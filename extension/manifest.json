@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "MC Check for Gmail (Highway)",
+  "version": "0.1.0",
+  "description": "Finds the carrier MC# in each Gmail email and tags it PASS/FAIL using your Highway account.",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://mail.google.com/*", "https://highway.com/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["src/gmail-main.js"],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://mail.google.com/*"],
+      "js": ["src/mc.js", "src/gmail.js"],
+      "css": ["src/gmail.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://highway.com/*"],
+      "js": ["src/highway-parse.js", "src/highway-worker.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": { "page": "options.html", "open_in_tab": true },
+  "action": { "default_title": "MC Check settings" }
+}

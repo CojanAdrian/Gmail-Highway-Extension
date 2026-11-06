@@ -1,0 +1,11 @@
+{
+  "name": "mc-check-gmail-highway",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1"
+  }
+}
