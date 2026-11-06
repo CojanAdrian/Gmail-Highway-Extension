@@ -3,9 +3,6 @@
 Tags Gmail inbox rows with the Highway assessment of the carrier's MC#, shown next to the timestamp:
 `PASS · MC 689501` (blue), `PARTIAL PASS` (green), `FAIL` (red), `Not on Highway` (amber), `No MC#`, `Checking…`.
 
-Only emails sent **solely to you** are checked (you are the only address in To + Cc of the newest
-message not sent by you). Group emails, mass blasts and Bcc'd emails get no tag.
-
 ## Install (no publishing needed)
 
 1. Open `brave://extensions` (or `chrome://extensions`).
@@ -18,8 +15,8 @@ After changing any file: click the reload ↻ icon on the extension card, then r
 
 ## How it works
 
-- **Gmail** (`src/gmail.js`): for each inbox row, reads the conversation through Gmail's print view,
-  checks the recipients, then takes the MC# from the subject/preview or the first MC# in the
+- **Gmail** (`src/gmail.js`): for each inbox row, looks for the MC# in the subject and preview; if
+  missing, reads the full conversation through Gmail's print view and takes the first MC# in the
   newest message (quoted replies removed; older messages only if the newest has none).
 - **Background** (`background.js`): one queue for all MC#s, duplicates merged, results remembered
   for 12h. Up to 3 Highway lookups run at once.
@@ -30,7 +27,7 @@ After changing any file: click the reload ↻ icon on the extension card, then r
 
 ## Settings
 
-Click the extension icon: extra email addresses that count as you (aliases), MC#s to ignore (e.g. your own), how long to remember results, number of
+Click the extension icon: MC#s to ignore (e.g. your own), how long to remember results, number of
 Highway tabs.
 
 ## Troubleshooting

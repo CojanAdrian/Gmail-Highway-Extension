@@ -1,4 +1,4 @@
-const DEFAULTS = { ignore: [], myEmails: [], cacheHours: 12, workers: 3 };
+const DEFAULTS = { ignore: [], cacheHours: 12, workers: 3 };
 const $ = (id) => document.getElementById(id);
 
 function flash(text) {
@@ -8,7 +8,6 @@ function flash(text) {
 
 chrome.storage.sync.get(DEFAULTS).then((s) => {
   $('ignore').value = (s.ignore || []).join('\n');
-  $('myEmails').value = (s.myEmails || []).join('\n');
   $('cacheHours').value = s.cacheHours;
   $('workers').value = s.workers;
 });
@@ -20,13 +19,8 @@ $('save').addEventListener('click', async () => {
     .filter(Boolean);
   const cacheHours = Math.max(0.1, Number($('cacheHours').value) || DEFAULTS.cacheHours);
   const workers = Math.max(1, Math.min(6, Math.round(Number($('workers').value) || DEFAULTS.workers)));
-  const myEmails = $('myEmails')
-    .value.split(/[\s,;]+/)
-    .map((x) => x.trim().toLowerCase())
-    .filter((x) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
-  await chrome.storage.sync.set({ ignore, myEmails, cacheHours, workers });
+  await chrome.storage.sync.set({ ignore, cacheHours, workers });
   $('ignore').value = ignore.join('\n');
-  $('myEmails').value = myEmails.join('\n');
   flash('Saved.');
 });
 

@@ -62,39 +62,3 @@ test('extractMc: subject first, then newest message, then older', () => {
     null
   );
 });
-
-const { parseMessage, solelyToMe } = require('../extension/src/mc.js');
-
-const ME = ['me@gmail.com'];
-const msg = (from, to, cc = '', body = 'Hello\nMC 689501') =>
-  parseMessage(`Carrier Guy <${from}>\tMon, Nov 3, 2026 at 9:00 AM\nTo: ${to}\n${cc ? `Cc: ${cc}\n` : ''}\n${body}`);
-
-test('parseMessage reads sender, To and Cc', () => {
-  const m = msg('c@carrier.com', 'Me <ME@gmail.com>, x@y.com', 'boss@co.com');
-  assert.equal(m.from, 'c@carrier.com');
-  assert.deepEqual(m.to, ['me@gmail.com', 'x@y.com']);
-  assert.deepEqual(m.cc, ['boss@co.com']);
-});
-
-test('solelyToMe: only me in To -> eligible', () => {
-  assert.ok(solelyToMe([msg('c@carrier.com', 'me@gmail.com')], ME));
-});
-
-test('solelyToMe: other recipients, Cc, or Bcc/undisclosed -> skipped', () => {
-  assert.equal(solelyToMe([msg('c@carrier.com', 'me@gmail.com, other@co.com')], ME), null);
-  assert.equal(solelyToMe([msg('c@carrier.com', 'me@gmail.com', 'other@co.com')], ME), null);
-  assert.equal(solelyToMe([msg('c@carrier.com', 'undisclosed-recipients:;')], ME), null);
-  assert.equal(solelyToMe([msg('c@carrier.com', 'list@carrier.com')], ME), null);
-});
-
-test('solelyToMe: my own newest reply is skipped, carrier message decides', () => {
-  const thread = [msg('me@gmail.com', 'c@carrier.com', '', 'thanks'), msg('c@carrier.com', 'me@gmail.com')];
-  const rel = solelyToMe(thread, ME);
-  assert.equal(rel.length, 1);
-  assert.equal(rel[0].from, 'c@carrier.com');
-  assert.equal(solelyToMe([msg('me@gmail.com', 'c@carrier.com')], ME), null);
-});
-
-test('solelyToMe: aliases count as me', () => {
-  assert.ok(solelyToMe([msg('c@carrier.com', 'me@gmail.com', 'dispatch@me.com')], [...ME, 'dispatch@me.com']));
-});

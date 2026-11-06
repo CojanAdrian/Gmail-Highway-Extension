@@ -1,11 +1,10 @@
 // Gmail content script: finds inbox rows, extracts the MC#, shows a tag.
 (function () {
   const ROW_SEL = 'tr.zA';
-  const PRINT_CONCURRENCY = 6;
+  const PRINT_CONCURRENCY = 4;
 
   const state = {
     ignore: new Set(),
-    extraEmails: [], // aliases from settings
     loginNeeded: false,
     results: new Map(), // mc -> result from background
     requested: new Set(), // mcs already sent to background from this tab
@@ -18,31 +17,18 @@
     state.ignore = new Set((list || []).map(McParse.normalizeMc).filter(Boolean));
   }
 
-  let settingsLoaded = false;
-  chrome.storage.sync.get({ ignore: [], myEmails: [] }).then((s) => {
+  chrome.storage.sync.get({ ignore: [] }).then((s) => {
     setIgnore(s.ignore);
-    state.extraEmails = s.myEmails || [];
-    settingsLoaded = true;
     scheduleScan();
   });
 
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync' || !(changes.ignore || changes.myEmails)) return;
-    if (changes.ignore) setIgnore(changes.ignore.newValue);
-    if (changes.myEmails) state.extraEmails = changes.myEmails.newValue || [];
-    state.threads.clear(); // re-evaluate every row with the new settings
-    scheduleScan();
+    if (area === 'sync' && changes.ignore) {
+      setIgnore(changes.ignore.newValue);
+      state.threads.clear(); // re-extract with the new ignore list
+      scheduleScan();
+    }
   });
-
-  // The signed-in account's address(es): from Gmail itself + settings.
-  function myEmails() {
-    const out = new Set(state.extraEmails.map((e) => String(e).toLowerCase().trim()));
-    const attr = document.documentElement.getAttribute('data-mcx-email');
-    if (attr) out.add(attr.toLowerCase());
-    for (const e of McParse.emailsIn(document.title)) out.add(e);
-    out.delete('');
-    return [...out];
-  }
 
   // ---------- background messaging ----------
 
@@ -127,7 +113,7 @@
     return out;
   }
 
-  // Newest-first list of parsed messages ({ from, to, cc, text }), quoted parts removed.
+  // Newest-first list of each message's text, quoted parts removed.
   async function fetchThreadMessages(threadId) {
     const ik = getIk();
     const qs = (ik ? `ik=${ik}&` : '') + `view=pt&search=all&th=${encodeURIComponent(threadId)}`;
@@ -141,7 +127,7 @@
       clone
         .querySelectorAll('blockquote, .gmail_quote, .gmail_extra, #divRplyFwdMsg, #appendonsend ~ *')
         .forEach((q) => q.remove());
-      return McParse.parseMessage(htmlToText(clone));
+      return htmlToText(clone);
     });
   }
 
@@ -164,24 +150,12 @@
     });
   }
 
-  let warnedNoRecipients = false;
-
-  // -> { skip: true } when the email wasn't sent solely to me, else { mc }.
+  // Subject/preview first; only reads the full email if no MC# is there.
   async function resolveRow(threadId, subject, snippet) {
-    const mine = myEmails();
-    if (!mine.length) throw new Error('could not detect your email address (add it in settings)');
+    const quick = McParse.extractMc({ subject, snippet }, state.ignore);
+    if (quick) return { mc: quick };
     const messages = await limited(() => fetchThreadMessages(threadId));
-    if (!warnedNoRecipients && messages.every((m) => !m.to.length && !m.cc.length)) {
-      warnedNoRecipients = true;
-      console.warn('[MC Check] could not read recipients from Gmail print view', threadId, messages);
-    }
-    const relevant = McParse.solelyToMe(messages, mine);
-    if (!relevant) return { skip: true };
-    const mc = McParse.extractMc(
-      { subject, snippet, messages: relevant.map((m) => m.text) },
-      state.ignore
-    );
-    return { mc };
+    return { mc: McParse.extractMc({ subject, snippet, messages }, state.ignore) };
   }
 
   // ---------- rows & tags ----------
@@ -222,7 +196,6 @@
   }
 
   function processRow(row) {
-    if (!settingsLoaded) return;
     const info = rowInfo(row);
     if (!info) return;
     const tag = ensureTag(row, info.key);
@@ -262,14 +235,8 @@
     let view;
     let mc = null;
     let result = null;
-    // Not sent solely to me (or not decided yet): no tag at all.
-    const hide = !t || t.pending || t.skip;
-    if (tag.hidden !== hide) tag.hidden = hide;
-    if (hide) {
-      if (tag.dataset.view !== 'hidden') tag.dataset.view = 'hidden';
-      return;
-    }
-    if (t.error) view = 'readerr';
+    if (!t || t.pending) view = 'scanning';
+    else if (t.error) view = 'readerr';
     else if (t.error) view = 'readerr';
     else if (!t.mc) view = 'nomc';
     else {
@@ -285,7 +252,7 @@
     if (mc && ['pass', 'partial', 'fail', 'other', 'not_found', 'checking', 'login', 'error'].includes(view)) {
       label = `${label} · MC ${mc}`;
     }
-    if (t.error && t.message) title = `${title}\n${t.message}`;
+    if (t && t.error && t.message) title = `${title}\n${t.message}`;
     if (result && ['pass', 'partial', 'fail', 'other'].includes(view)) {
       const when = result.checkedAt ? new Date(result.checkedAt).toLocaleString() : '';
       title = `${result.name || ''}\nHighway assessment: ${result.label}\nChecked: ${when}\nClick to open on Highway`.trim();

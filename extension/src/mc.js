@@ -78,61 +78,7 @@
     return null;
   }
 
-  // ---------- recipients ----------
-
-  const EMAIL_RE = /[A-Za-z0-9._%+\-']+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g;
-
-  function emailsIn(text) {
-    return (String(text || '').match(EMAIL_RE) || []).map((e) => e.toLowerCase());
-  }
-
-  function headerField(text, name) {
-    const re = new RegExp(
-      `(?:^|\\n)[ \\t]*${name}[ \\t]*:[ \\t]*([\\s\\S]*?)(?=\\n[ \\t]*(?:To|Cc|Bcc|Reply-To|Date|Subject)[ \\t]*:|\\n[ \\t]*\\n|$)`,
-      'i'
-    );
-    const m = re.exec(text);
-    return m ? m[1] : '';
-  }
-
-  // Parse one message's plain text (Gmail print view): sender is the first
-  // address before the "To:" line; To/Cc from their header lines.
-  function parseMessage(text) {
-    const t = String(text || '').replace(/\r\n?/g, '\n');
-    const toIdx = t.search(/(^|\n)[ \t]*To[ \t]*:/i);
-    const head = toIdx >= 0 ? t.slice(0, toIdx) : t.slice(0, 300);
-    return {
-      from: emailsIn(head)[0] || null,
-      to: emailsIn(headerField(t, 'To')),
-      cc: emailsIn(headerField(t, 'Cc')),
-      text: t,
-    };
-  }
-
-  // messages: parsed messages NEWEST FIRST. Returns the messages from the
-  // newest non-me message onward, or null if that message wasn't sent
-  // solely to me (only my addresses in To + Cc).
-  function solelyToMe(messages, myEmails) {
-    const mine = new Set((myEmails || []).map((e) => String(e).toLowerCase().trim()).filter(Boolean));
-    if (!mine.size) return null;
-    const idx = messages.findIndex((m) => !m.from || !mine.has(m.from));
-    if (idx < 0) return null;
-    const target = messages[idx];
-    const recipients = [...target.to, ...target.cc];
-    if (!recipients.length || !recipients.every((r) => mine.has(r))) return null;
-    return messages.slice(idx).filter((m) => !m.from || !mine.has(m.from));
-  }
-
-  const api = {
-    findAllMcs,
-    findFirstMc,
-    stripQuoted,
-    extractMc,
-    normalizeMc,
-    emailsIn,
-    parseMessage,
-    solelyToMe,
-  };
+  const api = { findAllMcs, findFirstMc, stripQuoted, extractMc, normalizeMc };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.McParse = api;
 })(typeof self !== 'undefined' ? self : this);
