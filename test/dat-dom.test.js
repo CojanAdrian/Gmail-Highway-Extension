@@ -31,7 +31,7 @@ async function setup(rowsHtml, results) {
       },
     },
   };
-  w.eval(src('dat-extract.js'));
+  // Like Chrome: dat-extract.js only runs in the page (MAIN) world, not here.
   w.eval(src('tags.js'));
   w.eval(src('dat.js'));
   return { w, sent };

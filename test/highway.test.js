@@ -162,3 +162,59 @@ test('new layout: "In Network" badge is never mistaken for the assessment', () =
   const failRow = ['ACME LLC', 'X, TX', '1', '555555', 'Fail'];
   assert.equal(readHighway(doc(NEW_GRID([failRow], '555555')), '555555').match.status, 'fail');
 });
+
+// ---- Narrow-window (mobile) card layout, as seen in the minimized worker window.
+const card = (name, dot, mc, assessment, extraBadge = 'In Network') => `
+  <div class="card">
+    <a href="#">${name}</a>
+    <div class="badges"><span class="b">${assessment}</span><span class="b">${extraBadge}</span></div>
+    <div>DOT: ${dot} · MC: ${mc}</div>
+    <div><svg></svg> CREST HILL, IL</div>
+    <div><svg></svg><a>(630) 866-7777</a></div>
+    <div><svg></svg><a>matt@uzbfreight.com</a></div>
+    <div class="foot"><span>Fleet: 296</span><span><svg></svg> Connected</span><svg></svg></div>
+  </div>`;
+const CARD_PAGE = (cards, q) => `<div id="app"><div class="layout">
+  <header><button>menu</button><span>HIGHWAY</span></header>
+  <h1>Results for “${q}”</h1>
+  <div class="cards">${cards.join("")}</div></div></div>`;
+
+test('card layout: "MC: 004213" with colon and leading zeros, Partial Pass', () => {
+  const s = readHighway(doc(CARD_PAGE([card('UZB FREIGHT INC', '02960200', '004213', 'Partial Pass')], '4213')), '4213');
+  assert.equal(s.headingQuery, '4213');
+  assert.ok(s.mcFound, 'MC found');
+  assert.equal(s.match && s.match.status, 'partial');
+  assert.equal(s.match.name, 'UZB FREIGHT INC');
+});
+
+test('card layout: several cards, each gets its own badge', () => {
+  const d = doc(
+    CARD_PAGE(
+      [
+        card('UZB FREIGHT INC', '02960200', '004213', 'Partial Pass'),
+        card('OTHER CARRIER LLC', '1111111', '004214', 'Fail', 'Not In Network'),
+        card('THIRD LLC', '2222222', '555555', 'Pass'),
+      ],
+      'x'
+    )
+  );
+  assert.equal(readHighway(d, '4213').match.status, 'partial');
+  assert.equal(readHighway(d, '4214').match.status, 'fail');
+  assert.equal(readHighway(d, '555555').match.status, 'pass');
+});
+
+test('MC text variants on Highway pages', () => {
+  const { mcsIn } = require('../extension/src/highway-parse.js');
+  for (const t of ['MC 4213', 'MC: 004213', 'MC#4213', 'MC #: 4213', 'DOT: 02960200 · MC: 004213']) {
+    assert.ok(mcsIn(t).has('4213'), t);
+  }
+  assert.ok(!mcsIn('DOT: 4213').has('4213'));
+});
+
+test('card layout: a "Fail" filter elsewhere on the page is not mistaken for the badge', () => {
+  const html = CARD_PAGE([card('UZB FREIGHT INC', '02960200', '004213', 'Partial Pass')], '4213').replace(
+    '<header>',
+    '<header><div class="filters"><span>Fail</span><span>Pass</span></div>'
+  );
+  assert.equal(readHighway(doc(html), '4213').match.status, 'partial');
+});

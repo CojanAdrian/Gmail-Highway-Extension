@@ -285,11 +285,17 @@ async function ensureWorkerTab(slot) {
     }
     let tabId;
     if (!win) {
-      try {
-        win = await chrome.windows.create({ url: 'about:blank', focused: false, state: 'minimized' });
-      } catch {
-        win = await chrome.windows.create({ url: 'about:blank', focused: false });
-      }
+      // Desktop-sized, so Highway renders its normal (table) layout rather
+      // than the narrow card layout; then minimized out of the way.
+      win = await chrome.windows.create({
+        url: 'about:blank',
+        focused: false,
+        width: 1400,
+        height: 900,
+        left: 0,
+        top: 0,
+      });
+      chrome.windows.update(win.id, { state: 'minimized' }).catch(() => {});
       workerWindowId = win.id;
       const [first] = await chrome.tabs.query({ windowId: win.id });
       tabId = first.id;

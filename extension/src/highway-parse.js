@@ -1,7 +1,8 @@
 // Reads a Highway "search-results" page and finds the Assessment for one MC.
 // Works on a live document (content script) or a jsdom document (tests).
 (function (root) {
-  const MC_TEXT_RE = /\bMC\s*#?\s*0*(\d{1,8})(?!\d)/gi;
+  // "MC 4213", "MC: 004213" (narrow card layout), "MC# 4213", "MC #: 4213"
+  const MC_TEXT_RE = /\bMC\s*#?\s*:?\s*0*(\d{1,8})(?!\d)/gi;
   const KNOWN_LABEL_RE =
     /^(pass|passed|partial pass|partially passed|partial|fail|failed|review|needs review|warning|incomplete|pending|not assessed|unassessed|n\/a)$/i;
 
@@ -116,19 +117,36 @@
     return Array.from(cur.children);
   }
 
-  function readAssessment(doc, row) {
+  // Table layouts: the cell under the "Assessment" column header.
+  function readAssessmentByHeader(doc, row) {
     const cells = cellsOf(row);
     for (const header of findAssessmentHeaders(doc)) {
       if (header.index < 0 || cells.length !== header.count) continue;
       const label = norm(textOf(cells[header.index]));
       if (label) return label;
     }
-    // Fallback: a short leaf text inside the row that looks like a status badge.
-    const leaves = row.querySelectorAll('*');
-    for (const el of leaves) {
-      if (el.children.length) continue;
-      const t = norm(el.textContent);
+    return null;
+  }
+
+  function badgeIn(el) {
+    for (const leaf of el.querySelectorAll('*')) {
+      if (leaf.children.length) continue;
+      const t = norm(leaf.textContent);
       if (KNOWN_LABEL_RE.test(t)) return t;
+    }
+    return null;
+  }
+
+  // Any layout (cards, grids): the closest ancestor of the MC element that
+  // contains a status badge — i.e. that carrier's card/row, never something
+  // farther away on the page.
+  function nearestBadge(mcEl, limit) {
+    for (let el = mcEl; el; el = el.parentElement) {
+      if (el.tagName === 'BODY') break;
+      if (mcsIn(textOf(el)).size > 1) break; // reached several carriers
+      const label = badgeIn(el);
+      if (label) return { label, container: el };
+      if (el === limit) break;
     }
     return null;
   }
@@ -156,9 +174,14 @@
     const mcEls = findMcElements(doc, mc);
     for (const el of mcEls) {
       const row = findRow(el);
-      const label = readAssessment(doc, row);
+      let label = readAssessmentByHeader(doc, row);
+      let container = row;
+      if (!label) {
+        const near = nearestBadge(el, null);
+        if (near) ({ label, container } = near);
+      }
       if (label) {
-        match = { status: statusFromLabel(label), label, name: readName(row) };
+        match = { status: statusFromLabel(label), label, name: readName(container) };
         break;
       }
     }

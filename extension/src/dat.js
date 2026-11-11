@@ -2,7 +2,16 @@
 // from DAT's own search responses), starts Highway lookups for all of them
 // right away, and puts a compact PASS/FAIL tag before each company name.
 (function () {
-  const { normName } = McxDatExtract;
+  // Same as McxDatExtract.normName. Copied on purpose: dat-extract.js runs in
+  // the page (MAIN) world, and Chrome injects an identical file only once per
+  // frame, so it is NOT available in this (isolated) world.
+  function normName(s) {
+    return String(s || '')
+      .toUpperCase()
+      .replace(/[.,]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
   const store = McxTags.createStore(() => renderAll());
   const byName = new Map(); // normalized company name -> Map(mc -> contacts[])
   let ignore = new Set();
