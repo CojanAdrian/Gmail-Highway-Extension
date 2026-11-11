@@ -75,7 +75,40 @@
     return out;
   }
 
-  const api = { extractCarriers, normName, normMc };
+  // Diagnostics: "path = value" lines for the first posting that has a
+  // carrier MC, so DAT's data layout can be inspected.
+  function shapeOfFirstPosting(json) {
+    let found = null;
+    (function walk(v, posting, depth) {
+      if (found || depth > 40 || v == null || typeof v !== 'object') return;
+      if (Array.isArray(v)) {
+        for (const x of v) walk(x, x && typeof x === 'object' ? x : posting, depth + 1);
+        return;
+      }
+      for (const [k, x] of Object.entries(v)) {
+        if (MC_KEY_RE.test(k) && !/broker/i.test(k) && normMc(x)) {
+          found = posting || v;
+          return;
+        }
+        if (x && typeof x === 'object') walk(x, posting, depth + 1);
+      }
+    })(json, null, 0);
+    if (!found) return null;
+    const lines = [];
+    (function walk(v, path, depth) {
+      if (lines.length >= 90 || depth > 8) return;
+      if (v == null || typeof v !== 'object') {
+        if (v === null || v === '') return;
+        lines.push(`${path} = ${JSON.stringify(v).slice(0, 50)}`);
+        return;
+      }
+      if (Array.isArray(v)) v.slice(0, 3).forEach((x, i) => walk(x, `${path}[${i}]`, depth + 1));
+      else for (const [k, x] of Object.entries(v)) walk(x, path ? `${path}.${k}` : k, depth + 1);
+    })(found, '', 0);
+    return lines;
+  }
+
+  const api = { extractCarriers, normName, normMc, shapeOfFirstPosting };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.McxDatExtract = api;
 })(typeof self !== 'undefined' ? self : this);

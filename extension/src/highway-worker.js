@@ -4,6 +4,13 @@
     if (msg.type === 'hw-check') {
       const snap = HighwayParse.readHighway(document, msg.mc);
       snap.href = location.href;
+      if (msg.debug) {
+        try {
+          snap.debug = HighwayParse.debugSample(document, msg.mc);
+        } catch (e) {
+          snap.debug = { error: String(e) };
+        }
+      }
       sendResponse(snap);
       return;
     }

@@ -16,9 +16,95 @@
     }
   });
 
+  // ---------- diagnostics (sent to the background, shown in settings) ----------
+
+  const diag = {
+    frame: window === window.top ? 'top' : 'iframe',
+    href: location.href,
+    contentScript: true,
+    hookHello: false,
+    hook: null,
+    carrierMessages: 0,
+    carriers: 0,
+    uniqueMcs: 0,
+    sampleCarriers: [],
+    shape: null,
+    tagsOnPage: 0,
+    unmatchedRows: [],
+    iframes: [],
+  };
+  const seenMcs = new Set();
+
+  let diagTimer = null;
+  function reportSoon() {
+    if (diagTimer) return;
+    diagTimer = setTimeout(() => {
+      diagTimer = null;
+      diag.href = location.href;
+      diag.tagsOnPage = document.querySelectorAll('.mcx-tag').length;
+      if (window === window.top) {
+        diag.iframes = [...document.querySelectorAll('iframe')].map((f) => (f.src || '(no src)').slice(0, 120)).slice(0, 8);
+      }
+      if (diag.carriers && !diag.tagsOnPage) diag.unmatchedRows = sampleUnmatched();
+      store.send({ type: 'dat-stats', stats: diag });
+    }, 1500);
+  }
+
+  // For a few carriers, find their row on screen by phone number and report
+  // the row's text, to see why the company name didn't match.
+  function sampleUnmatched() {
+    const out = [];
+    if (!document.body) return out;
+    const phones = [];
+    for (const m of byName.values()) {
+      for (const contacts of m.values()) {
+        for (const c of contacts) if (/^\d{10,}$/.test(c)) phones.push(c.slice(-10));
+      }
+      if (phones.length >= 6) break;
+    }
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode()) && out.length < 3) {
+      const digits = (node.nodeValue || '').replace(/\D/g, '');
+      if (digits.length < 10) continue;
+      if (!phones.some((p) => digits.includes(p))) continue;
+      let row = node.parentElement;
+      for (let i = 0; i < 6 && row.parentElement && (row.parentElement.textContent || '').length < 600; i++) {
+        row = row.parentElement;
+      }
+      out.push((row.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300));
+    }
+    if (!out.length) out.push('(no row on screen contains any carrier phone number from the data)');
+    return out;
+  }
+
+  reportSoon();
+
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data.source !== 'mcx-dat') return;
-    for (const c of e.data.carriers || []) {
+    const d = e.data;
+    if (d.kind === 'hello') {
+      diag.hookHello = true;
+      reportSoon();
+      return;
+    }
+    if (d.kind === 'stats') {
+      diag.hook = d.stats;
+      reportSoon();
+      return;
+    }
+    diag.carrierMessages++;
+    if (d.shape) diag.shape = d.shape;
+    for (const c of d.carriers || []) {
+      diag.carriers++;
+      if (c && c.mc && !seenMcs.has(c.mc)) {
+        seenMcs.add(c.mc);
+        if (diag.sampleCarriers.length < 5) diag.sampleCarriers.push({ mc: c.mc, names: c.names });
+      }
+    }
+    diag.uniqueMcs = seenMcs.size;
+    reportSoon();
+    for (const c of d.carriers || []) {
       if (!c || !c.mc || ignore.has(c.mc)) continue;
       for (const name of c.names || []) {
         if (!name) continue;
@@ -115,6 +201,7 @@
       tag.dataset.forMc = mc;
       renderTag(tag);
     }
+    reportSoon();
   }
 
   function renderTag(tag) {

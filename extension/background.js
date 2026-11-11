@@ -72,7 +72,7 @@ function saveCacheSoon() {
 // ---------- messaging ----------
 
 async function broadcast(msg) {
-  const tabs = await chrome.tabs.query({ url: ['https://mail.google.com/*', 'https://one.dat.com/*'] });
+  const tabs = await chrome.tabs.query({ url: ['https://mail.google.com/*', 'https://*.dat.com/*'] });
   for (const t of tabs) chrome.tabs.sendMessage(t.id, msg).catch(() => {});
 }
 
@@ -106,6 +106,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         fastNavDisabled = false;
         await chrome.storage.local.set({ fastNavDisabled });
         return sendResponse({ ok: true });
+      case 'dat-stats': {
+        const key = `${sender.tab ? sender.tab.id : '?'}:${sender.frameId}`;
+        datStats[key] = { ...msg.stats, frameId: sender.frameId, at: new Date().toISOString() };
+        const keys = Object.keys(datStats);
+        if (keys.length > 12) delete datStats[keys[0]];
+        return sendResponse({ ok: true });
+      }
+      case 'diag-run':
+        return sendResponse(await runDiagnostics(msg.mc));
       default:
         return sendResponse({ error: 'unknown message' });
     }
@@ -113,20 +122,73 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true; // async response
 });
 
+const pendingFinal = new Map(); // mc -> promise of the broadcast result
+
+// Returns a promise for the final result (never rejects).
 function enqueue(mc) {
-  if (queue.has(mc)) return;
-  queue
+  if (pendingFinal.has(mc)) return pendingFinal.get(mc);
+  const p = queue
     .add(mc)
     .then((result) => {
       result = { ...result, mc, checkedAt: Date.now() };
       cache[mc] = { result, ts: Date.now() };
       saveCacheSoon();
       broadcast({ type: 'result', mc, result });
+      return result;
     })
     .catch((err) => {
       console.warn('[MC Check] lookup failed', mc, err);
-      broadcast({ type: 'result', mc, result: { status: 'error', label: 'Error', mc, error: String(err && err.message || err) } });
-    });
+      const result = { status: 'error', label: 'Error', mc, error: String((err && err.message) || err) };
+      broadcast({ type: 'result', mc, result });
+      return result;
+    })
+    .finally(() => pendingFinal.delete(mc));
+  pendingFinal.set(mc, p);
+  return p;
+}
+
+// ---------- diagnostics ----------
+
+const recentLookups = []; // last 20 traces
+let datStats = {}; // "tabId:frameId" -> stats reported by dat.js
+
+function newTrace(mc) {
+  const trace = { mc, startedAt: new Date().toISOString(), attempts: [], outcome: null };
+  recentLookups.push(trace);
+  if (recentLookups.length > 20) recentLookups.shift();
+  return trace;
+}
+
+async function runDiagnostics(mcRaw) {
+  const mc = McParse.normalizeMc(mcRaw) || '689501';
+  const report = {
+    version: chrome.runtime.getManifest().version,
+    time: new Date().toISOString(),
+    settings,
+    loginNeeded,
+    fastNavDisabled,
+    queueSize: queue.size,
+    workerSlots: slots,
+  };
+  const statuses = {};
+  for (const e of Object.values(cache)) {
+    const s = (e.result && e.result.status) || '?';
+    statuses[s] = (statuses[s] || 0) + 1;
+  }
+  report.cache = { total: Object.keys(cache).length, byStatus: statuses, entryForTestMc: cache[mc] || null };
+  // Fresh lookup of the test MC (bypasses saved results).
+  delete cache[mc];
+  const result = await Promise.race([
+    enqueue(mc),
+    new Promise((r) => setTimeout(() => r({ status: 'diag-timeout', note: 'no result after 45s' }), 45000)),
+  ]);
+  report.testLookup = { mc, result, trace: [...recentLookups].reverse().find((t) => t.mc === mc) || null };
+  report.recentLookups = recentLookups
+    .filter((t) => t.mc !== mc)
+    .slice(-8)
+    .map((t) => ({ mc: t.mc, outcome: t.outcome, attempts: t.attempts.length }));
+  report.dat = Object.keys(datStats).length ? datStats : 'no DAT page has reported (DAT content script not running?)';
+  return report;
 }
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
@@ -281,24 +343,57 @@ function loginError() {
 }
 
 async function lookupWithRetry(mc, slot) {
-  if (loginNeeded) throw loginError();
+  const trace = newTrace(mc);
   try {
-    return await lookupOnSlot(mc, slot, false);
+    if (loginNeeded) throw loginError();
+    let result;
+    try {
+      result = await lookupOnSlot(mc, slot, false, trace);
+    } catch (e) {
+      if (e.requeue) throw e;
+      console.warn('[MC Check] retrying', mc, e.message);
+      if (slots[slot]) slots[slot].loaded = false;
+      result = await lookupOnSlot(mc, slot, true, trace);
+    }
+    trace.outcome = result;
+    return result;
   } catch (e) {
-    if (e.requeue) throw e;
-    console.warn('[MC Check] retrying', mc, e.message);
-    if (slots[slot]) slots[slot].loaded = false;
-    return lookupOnSlot(mc, slot, true);
+    trace.outcome = { error: String((e && e.message) || e) };
+    throw e;
   }
 }
 
-async function lookupOnSlot(mc, slot, forceFull) {
+// Short summary of a page snapshot for the diagnostics trace.
+function snapSummary(snap) {
+  if (!snap) return null;
+  return {
+    href: snap.href,
+    headingQuery: snap.headingQuery,
+    mcFound: snap.mcFound,
+    rowCount: snap.rowCount,
+    match: snap.match,
+  };
+}
+
+async function lookupOnSlot(mc, slot, forceFull, trace) {
+  const attempt = { slot, forceFull, steps: [] };
+  if (trace) trace.attempts.push(attempt);
+  const t0 = Date.now();
+  let lastStep = '';
+  const step = (what, data) => {
+    const line = JSON.stringify([what, data]);
+    if (line === lastStep) return; // only record changes
+    lastStep = line;
+    if (attempt.steps.length < 40) attempt.steps.push({ ms: Date.now() - t0, what, ...data });
+  };
+
   const tabId = await ensureWorkerTab(slot);
   const s = slots[slot];
   const url = HW_SEARCH + encodeURIComponent(mc);
 
   let mode = s.loaded && !fastNavDisabled && !forceFull ? 'fast' : 'full';
   let prevRowsKey = '';
+  step('start', { tabId, mode, url });
 
   if (mode === 'fast') {
     try {
@@ -306,17 +401,31 @@ async function lookupOnSlot(mc, slot, forceFull) {
       prevRowsKey = prev.rowsKey || '';
       const r = await sendToTab(tabId, { type: 'hw-nav', url });
       if (!r || !r.ok) throw new Error('nav failed');
-    } catch {
+    } catch (e) {
+      step('fast-nav-failed', { error: String(e && e.message) });
       mode = 'full';
     }
   }
   if (mode === 'full') {
     const tab = await navigateFull(tabId, url);
+    step('loaded', { url: tab.url });
     if (isHighwayLoginPage(tab.url)) {
+      step('login-page', { url: tab.url });
       await setLoginNeeded(true);
       throw loginError();
     }
   }
+
+  const finish = async (what, data) => {
+    // Grab an HTML sample of the page for diagnostics.
+    try {
+      const snap = await sendToTab(tabId, { type: 'hw-check', mc, debug: true });
+      attempt.page = snap.debug;
+    } catch (e) {
+      attempt.page = { error: String(e && e.message) };
+    }
+    step(what, data);
+  };
 
   let start = Date.now();
   let headingAt = null;
@@ -324,19 +433,22 @@ async function lookupOnSlot(mc, slot, forceFull) {
     await sleep(POLL_MS);
     const tab = await chrome.tabs.get(tabId);
     if (isHighwayLoginPage(tab.url)) {
+      step('login-page', { url: tab.url });
       await setLoginNeeded(true);
       throw loginError();
     }
     let snap = null;
     try {
       snap = await sendToTab(tabId, { type: 'hw-check', mc });
-    } catch {
+    } catch (e) {
       snap = null; // page still loading
+      step('no-answer-from-page', { error: String(e && e.message), url: tab.url });
     }
     const now = Date.now();
     let d;
     if (snap) {
       if (headingAt == null && HighwayParse.headingMatches(snap, mc)) headingAt = now;
+      step('page', snapSummary(snap));
       d = HighwayParse.decide(
         snap,
         mc,
@@ -350,20 +462,26 @@ async function lookupOnSlot(mc, slot, forceFull) {
     if (d.done) {
       s.loaded = true;
       saveSession();
+      await finish('done', { result: d.done });
       return d.done;
     }
     if (d.fallback) {
       // In-app navigation didn't work; stop using it and reload instead.
       console.warn('[MC Check] fast navigation did not work; switching to full page loads');
+      step('fast-nav-gave-up', {});
       fastNavDisabled = true;
       chrome.storage.local.set({ fastNavDisabled });
       mode = 'full';
       prevRowsKey = '';
-      await navigateFull(tabId, url);
+      const t2 = await navigateFull(tabId, url);
+      step('loaded', { url: t2.url });
       start = Date.now();
       headingAt = null;
       continue;
     }
-    if (d.error) throw new Error(d.error);
+    if (d.error) {
+      await finish('error', { error: d.error });
+      throw new Error(d.error);
+    }
   }
 }

@@ -42,6 +42,20 @@
     <span id="msg"></span>
   </div>
 
+  <h2 style="font-size:17px;margin-top:40px">Diagnostics</h2>
+  <p style="color:#5f6368;margin:4px 0 0">
+    If tags are wrong or missing: keep a DAT tab open after running a truck search, then click
+    <b>Run diagnostics</b>. It does a fresh Highway lookup of the MC# below and collects what the
+    extension sees on DAT. Click <b>Copy report</b> and send it to whoever maintains the extension.
+  </p>
+  <div class="row">
+    <input id="diagMc" value="689501" style="width:120px" aria-label="Test MC#" />
+    <button class="primary" id="diagRun">Run diagnostics</button>
+    <button id="diagCopy" disabled>Copy report</button>
+    <span id="diagMsg"></span>
+  </div>
+  <pre id="diagOut" style="white-space:pre-wrap;word-break:break-all;background:#f1f3f4;border-radius:6px;padding:10px;font-size:11px;max-height:420px;overflow:auto;display:none"></pre>
+
   <script src="options.js"></script>
 </body>
 </html>

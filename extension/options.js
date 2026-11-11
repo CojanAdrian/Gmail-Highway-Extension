@@ -29,6 +29,29 @@ $('clear').addEventListener('click', async () => {
   flash('Saved results cleared. Reload Gmail to re-check.');
 });
 
+$('diagRun').addEventListener('click', async () => {
+  $('diagRun').disabled = true;
+  $('diagCopy').disabled = true;
+  $('diagMsg').textContent = 'Running… (up to ~45 seconds)';
+  $('diagOut').style.display = 'none';
+  try {
+    const report = await chrome.runtime.sendMessage({ type: 'diag-run', mc: $('diagMc').value });
+    $('diagOut').textContent = JSON.stringify(report, null, 1);
+    $('diagMsg').textContent = 'Done.';
+    $('diagCopy').disabled = false;
+  } catch (e) {
+    $('diagOut').textContent = 'Diagnostics failed: ' + e;
+    $('diagMsg').textContent = '';
+  }
+  $('diagOut').style.display = 'block';
+  $('diagRun').disabled = false;
+});
+
+$('diagCopy').addEventListener('click', async () => {
+  await navigator.clipboard.writeText($('diagOut').textContent);
+  $('diagMsg').textContent = 'Copied — paste it in the chat.';
+});
+
 $('fast').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'reset-fast-nav' });
   flash('Fast navigation re-enabled.');

@@ -1,42 +1,89 @@
 {
   "manifest_version": 3,
   "name": "MC Check for Gmail & DAT (Highway)",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Tags carriers in Gmail and DAT One with their Highway assessment (PASS/FAIL), using your Highway account.",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["https://mail.google.com/*", "https://highway.com/*", "https://one.dat.com/*"],
-  "background": { "service_worker": "background.js" },
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://mail.google.com/*",
+    "https://highway.com/*",
+    "https://*.dat.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://mail.google.com/*"],
-      "js": ["src/gmail-main.js"],
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "src/gmail-main.js"
+      ],
       "world": "MAIN",
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://mail.google.com/*"],
-      "js": ["src/mc.js", "src/tags.js", "src/gmail.js"],
-      "css": ["src/tags.css", "src/gmail.css"],
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "src/mc.js",
+        "src/tags.js",
+        "src/gmail.js"
+      ],
+      "css": [
+        "src/tags.css",
+        "src/gmail.css"
+      ],
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://one.dat.com/*"],
-      "js": ["src/dat-extract.js", "src/dat-main.js"],
+      "matches": [
+        "https://*.dat.com/*"
+      ],
+      "js": [
+        "src/dat-extract.js",
+        "src/dat-main.js"
+      ],
       "world": "MAIN",
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
-      "matches": ["https://one.dat.com/*"],
-      "js": ["src/dat-extract.js", "src/tags.js", "src/dat.js"],
-      "css": ["src/tags.css"],
-      "run_at": "document_start"
+      "matches": [
+        "https://*.dat.com/*"
+      ],
+      "js": [
+        "src/dat-extract.js",
+        "src/tags.js",
+        "src/dat.js"
+      ],
+      "css": [
+        "src/tags.css"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
     },
     {
-      "matches": ["https://highway.com/*"],
-      "js": ["src/highway-parse.js", "src/highway-worker.js"],
+      "matches": [
+        "https://highway.com/*"
+      ],
+      "js": [
+        "src/highway-parse.js",
+        "src/highway-worker.js"
+      ],
       "run_at": "document_idle"
     }
   ],
-  "options_ui": { "page": "options.html", "open_in_tab": true },
-  "action": { "default_title": "MC Check settings" }
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "MC Check settings"
+  }
 }

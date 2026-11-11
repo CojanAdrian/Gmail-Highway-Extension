@@ -207,7 +207,51 @@
     return !!snap.headingQuery && snap.headingQuery.toLowerCase() === String(query).toLowerCase();
   }
 
-  const api = { readHighway, mcsIn, decide, headingMatches, TIMING };
+  // Diagnostics: a trimmed HTML sample of the page around the MC (or the
+  // page text if the MC isn't there), so the layout can be inspected.
+  function debugSample(doc, mcRaw) {
+    const mc = String(mcRaw).replace(/^0+/, '');
+    const body = doc.body;
+    if (!body) return { note: 'no body' };
+    const bodyText = norm(textOf(body));
+    const at = bodyText.indexOf('Results for');
+    const out = {
+      title: doc.title,
+      heading: at >= 0 ? bodyText.slice(at, at + 80) : null,
+      bodyTextStart: bodyText.slice(0, 600),
+    };
+    const walker = doc.createTreeWalker(body, 4);
+    let node;
+    let hit = null;
+    while ((node = walker.nextNode())) {
+      const p = node.parentElement;
+      if (!p || /^(SCRIPT|STYLE|TITLE|H1|H2|H3)$/.test(p.tagName)) continue;
+      if ((node.nodeValue || '').indexOf(mc) !== -1) {
+        hit = p;
+        break;
+      }
+    }
+    if (!hit) {
+      out.mcTextOnPage = false;
+      return out;
+    }
+    out.mcTextOnPage = true;
+    out.mcElementText = norm(textOf(hit)).slice(0, 100);
+    // Climb until the sample includes the "Assessment" header or gets big.
+    let el = hit;
+    for (let i = 0; i < 14 && el.parentElement && el.parentElement !== body; i++) {
+      el = el.parentElement;
+      if (/Assessment/.test(textOf(el)) || el.outerHTML.length > 20000) break;
+    }
+    out.html = el.outerHTML
+      .replace(/<svg[\s\S]*?<\/svg>/gi, '<svg/>')
+      .replace(/\s(style|d|data-v-[\w-]+)="[^"]*"/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .slice(0, 9000);
+    return out;
+  }
+
+  const api = { readHighway, mcsIn, decide, headingMatches, TIMING, debugSample };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.HighwayParse = api;
 })(typeof self !== 'undefined' ? self : this);

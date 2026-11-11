@@ -38,7 +38,7 @@ async function setup(rowsHtml, results) {
 }
 
 function post(w, carriers) {
-  w.dispatchEvent(new w.MessageEvent('message', { data: { source: 'mcx-dat', carriers }, source: w }));
+  w.dispatchEvent(new w.MessageEvent('message', { data: { source: 'mcx-dat', kind: 'carriers', carriers }, source: w }));
 }
 
 test('tags every row with the right result, including truncated names and duplicates', async () => {
