@@ -190,27 +190,103 @@
       const cands = lookupName(trimmed);
       if (cands) found.push({ node, parent, cands });
     }
+    const placedRows = new Set();
     for (const { node, parent, cands } of found) {
       const mc = pickMc(cands, parent, node.nodeValue);
       if (!mc) continue;
-      // Put the tag before the element holding just the name (e.g. the link),
-      // or right before the text if the element holds more than the name.
-      const wrapperOnlyName = textOf(parent).trim() === node.nodeValue.trim();
-      const anchor = wrapperOnlyName ? parent : node;
-      const prev = anchor.previousSibling;
-      let tag = prev && prev.nodeType === 1 && prev.classList.contains('mcx-tag') ? prev : null;
-      if (!tag) {
-        tag = McxTags.makeTag((t) => {
-          McxTags.defaultClick(store, t);
-          renderAll();
-        });
-        tag.dataset.compact = '1';
-        anchor.parentNode.insertBefore(tag, anchor);
+      const row = findPostingRow(parent);
+      if (row === 'skip') continue; // e.g. the name inside the expanded details panel
+      if (row && placedRows.has(row)) continue; // the row's first name (the Company column) wins
+      if (row) placedRows.add(row);
+      let tag;
+      if (row) {
+        tag = row.querySelector(':scope > .mcx-tag[data-row]');
+        if (!tag) {
+          tag = newTag();
+          tag.dataset.row = '1';
+          if (getComputedStyle(row).position === 'static') row.style.position = 'relative';
+          row.appendChild(tag);
+        }
+        tag.dataset.forMc = mc;
+        renderTag(tag);
+        placeAtRowEnd(tag, row, parent);
+      } else {
+        // Fallback: before the company name.
+        const wrapperOnlyName = textOf(parent).trim() === node.nodeValue.trim();
+        const anchor = wrapperOnlyName ? parent : node;
+        const prev = anchor.previousSibling;
+        tag = prev && prev.nodeType === 1 && prev.classList.contains('mcx-tag') ? prev : null;
+        if (!tag) {
+          tag = newTag();
+          anchor.parentNode.insertBefore(tag, anchor);
+        }
+        tag.dataset.forMc = mc;
+        renderTag(tag);
       }
-      tag.dataset.forMc = mc;
-      renderTag(tag);
     }
     reportSoon();
+  }
+
+  function newTag() {
+    const tag = McxTags.makeTag((t) => {
+      McxTags.defaultClick(store, t);
+      renderAll();
+    });
+    tag.dataset.compact = '1';
+    return tag;
+  }
+
+  const CHECKBOX_SEL = 'input[type="checkbox"], [role="checkbox"], mat-checkbox';
+
+  // The posting's row = nearest ancestor of the company name that contains a
+  // row checkbox. If that ancestor holds several checkboxes (several rows),
+  // the name isn't inside a row (e.g. details panel) -> 'skip'.
+  // null = no checkbox found at all (unknown layout).
+  function findPostingRow(el) {
+    for (let cur = el.parentElement, i = 0; cur && cur !== document.body && i < 12; cur = cur.parentElement, i++) {
+      const boxes = cur.querySelectorAll(CHECKBOX_SEL);
+      if (!boxes.length) continue;
+      // A checkbox nested inside another checkbox element counts once.
+      const outer = [...boxes].filter((b) => ![...boxes].some((o) => o !== b && o.contains(b)));
+      return outer.length === 1 ? cur : 'skip';
+    }
+    return null;
+  }
+
+  // Float the tag just right of the row's last column, level with the name.
+  function placeAtRowEnd(tag, row, nameEl) {
+    const r = row.getBoundingClientRect();
+    const n = nameEl.getBoundingClientRect();
+    // The row's cells: descend through single-child wrappers.
+    const notTag = (c) => !c.classList.contains('mcx-tag');
+    let kids = [...row.children].filter(notTag);
+    while (kids.length === 1 && kids[0].children.length) kids = [...kids[0].children].filter(notTag);
+    // Right edge of the last cell that shows something (skip empty spacer cells).
+    let lastRight = 0;
+    for (const k of kids) {
+      const kr = k.getBoundingClientRect();
+      if (!(kr.width > 0 && kr.height > 0)) continue;
+      if (!k.textContent.trim() && !k.querySelector('svg, img, input, button')) continue;
+      lastRight = Math.max(lastRight, kr.right);
+    }
+    const tagW = tag.offsetWidth || 60;
+    const tagH = tag.offsetHeight || 16;
+    let left = lastRight ? lastRight - r.left + 12 : null;
+    if (left == null || left + tagW > r.width - 4) left = null; // no room: pin to the right edge
+    const top = n.height ? n.top - r.top + n.height / 2 - tagH / 2 : null;
+    const s = tag.style;
+    s.position = 'absolute';
+    s.zIndex = '2';
+    s.margin = '0';
+    s.top = top == null ? '50%' : `${Math.round(top)}px`;
+    s.marginTop = top == null ? `${-tagH / 2}px` : '0';
+    if (left == null) {
+      s.left = '';
+      s.right = '8px';
+    } else {
+      s.right = '';
+      s.left = `${Math.round(left)}px`;
+    }
   }
 
   function renderTag(tag) {
@@ -231,6 +307,8 @@
       scan();
     }, 250);
   }
+
+  window.addEventListener('resize', () => scheduleScan());
 
   function start() {
     new MutationObserver((muts) => {

@@ -103,3 +103,54 @@ test('rows added later (new trucks) get tagged too', async () => {
   assert.equal(w.document.querySelectorAll('.mcx-tag').length, 2);
   assert.equal(w.document.querySelector('.row .mcx-tag').textContent, 'FAIL');
 });
+
+// Rows with a checkbox, like DAT's results table.
+const cbRow = (company, contact, details = '') => `
+  <div class="row"><div class="cell"><input type="checkbox"></div><div class="cell">8m</div>
+  <div class="cell company"><a href="#">${company}</a></div>
+  <div class="cell contact"><a>${contact}</a> - IL</div><div class="cell network">–</div>${details}</div>`;
+
+test('tag goes at the end of the row (not in the company cell), once per row', async () => {
+  const details = '<div class="details"><h3>MATRIX LOGISTICS INC</h3><span>MC# 108527</span></div>';
+  const { w } = await setup(
+    cbRow('Matrix Logistics Inc', '(708) 351-7448', details) + cbRow('Alenkos Express Llc', '(859) 221-5295'),
+    { 108527: { status: 'pass', label: 'Pass' }, 200001: { status: 'fail', label: 'Fail' } }
+  );
+  post(w, [
+    { mc: '108527', names: ['MATRIX LOGISTICS INC'], contacts: [] },
+    { mc: '200001', names: ['ALENKOS EXPRESS LLC'], contacts: [] },
+  ]);
+  await sleep(400);
+  const rows = [...w.document.querySelectorAll('.row')];
+  for (const r of rows) {
+    const tags = r.querySelectorAll('.mcx-tag');
+    assert.equal(tags.length, 1, 'one tag per row');
+    assert.equal(tags[0].parentElement, r, 'tag is a direct child of the row');
+    assert.equal(tags[0].dataset.row, '1');
+    assert.equal(tags[0].style.position, 'absolute');
+  }
+  assert.equal(w.document.querySelector('.company .mcx-tag'), null, 'nothing in the company cell');
+  assert.deepEqual(rows.map((r) => r.querySelector('.mcx-tag').textContent), ['PASS', 'FAIL']);
+});
+
+test('company name outside any single row (e.g. a details panel listing) gets no tag', async () => {
+  const { w } = await setup(
+    `<div class="list"><input type="checkbox"><input type="checkbox"><h3>Matrix Logistics Inc</h3></div>`,
+    { 108527: { status: 'pass', label: 'Pass' } }
+  );
+  post(w, [{ mc: '108527', names: ['MATRIX LOGISTICS INC'], contacts: [] }]);
+  await sleep(400);
+  assert.equal(w.document.querySelectorAll('.mcx-tag').length, 0);
+});
+
+test('re-scans (new trucks arriving) never duplicate row tags', async () => {
+  const { w } = await setup(cbRow('Matrix Logistics Inc', '(708) 351-7448'), { 108527: { status: 'pass', label: 'Pass' } });
+  post(w, [{ mc: '108527', names: ['MATRIX LOGISTICS INC'], contacts: [] }]);
+  await sleep(400);
+  for (let i = 0; i < 3; i++) {
+    w.document.querySelector('.row').insertAdjacentHTML('afterend', cbRow('Matrix Logistics Inc', '(708) 351-7448'));
+    await sleep(350);
+  }
+  const counts = [...w.document.querySelectorAll('.row')].map((r) => r.querySelectorAll('.mcx-tag').length);
+  assert.deepEqual(counts, [1, 1, 1, 1]);
+});

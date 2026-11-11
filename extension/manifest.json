@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MC Check for Gmail & DAT (Highway)",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Tags carriers in Gmail and DAT One with their Highway assessment (PASS/FAIL), using your Highway account.",
   "permissions": [
     "storage",

@@ -6,7 +6,7 @@ Gmail: tags inbox rows with the Highway assessment of the carrier's MC#, shown n
 `PASS · MC 689501` (blue), `PARTIAL PASS` (green), `FAIL` (red), `Not on Highway` (amber), `No MC#`, `Checking…`.
 
 DAT One: when you run a truck search, every posting's carrier is looked up right away (visible or
-not), and a compact tag (`PASS` / `PARTIAL` / `FAIL` / `N/A`) appears before each company name. New
+not), and a compact tag (`PASS` / `PARTIAL` / `FAIL` / `N/A`) appears at the right end of each row. New
 trucks that show up later are tagged too. Hover a tag for the MC#; click it to open the carrier on Highway.
 
 ## Install (no publishing needed)
