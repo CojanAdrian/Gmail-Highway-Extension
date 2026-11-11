@@ -1,12 +1,28 @@
 // Reads a Highway "search-results" page and finds the Assessment for one MC.
 // Works on a live document (content script) or a jsdom document (tests).
 (function (root) {
-  const MC_TEXT_RE = /\bMC\s*#?\s*0*(\d{1,8})\b/gi;
+  const MC_TEXT_RE = /\bMC\s*#?\s*0*(\d{1,8})(?!\d)/gi;
   const KNOWN_LABEL_RE =
     /^(pass|passed|partial pass|partially passed|partial|fail|failed|review|needs review|warning|incomplete|pending|not assessed|unassessed|n\/a)$/i;
 
   function norm(s) {
     return String(s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // Like textContent, but with a space between text nodes, so stacked lines
+  // ("IG TRANSPORTATION INC" / "MC 689501" / "Pass") don't glue together.
+  function textOf(el) {
+    if (!el) return '';
+    const doc = el.ownerDocument || el;
+    const walker = doc.createTreeWalker(el, 4 /* SHOW_TEXT */);
+    const parts = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      const p = n.parentElement;
+      if (p && (p.tagName === 'SCRIPT' || p.tagName === 'STYLE')) continue;
+      parts.push(n.nodeValue);
+    }
+    return parts.join(' ');
   }
 
   function mcsIn(text) {
@@ -32,13 +48,23 @@
     const hits = [];
     let node;
     while ((node = walker.nextNode())) {
-      if (!node.nodeValue || node.nodeValue.indexOf(mc) === -1) continue;
-      // "MC" may be in a sibling node; climb at most 3 levels to find it.
-      let el = node.parentElement;
+      const v = node.nodeValue || '';
+      if (v.indexOf(mc) === -1) continue;
+      const parent = node.parentElement;
+      if (!parent || /^(SCRIPT|STYLE|TITLE)$/.test(parent.tagName)) continue;
+      if (mcsIn(v).has(mc)) {
+        // "MC 689501" in a single text node.
+        if (!hits.includes(parent)) hits.push(parent);
+        continue;
+      }
+      // "MC" and the number in separate nodes: the number must stand alone,
+      // and a small nearby element must read "MC <number>".
+      if (v.replace(/\D/g, '').replace(/^0+/, '') !== mc) continue;
+      let el = parent;
       for (let i = 0; el && i < 3; i++, el = el.parentElement) {
-        const tag = el.tagName;
-        if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TITLE') break;
-        if (mcsIn(el.textContent).has(mc)) {
+        const t = textOf(el);
+        if (t.length > 60) break;
+        if (mcsIn(t).has(mc)) {
           if (!hits.includes(el)) hits.push(el);
           break;
         }
@@ -54,7 +80,7 @@
     while (cur.parentElement && cur.parentElement.tagName !== 'BODY') {
       if (cur.tagName === 'TR' || cur.getAttribute('role') === 'row') return cur;
       const parent = cur.parentElement;
-      const text = parent.textContent || '';
+      const text = textOf(parent);
       if (mcsIn(text).size > 1) break; // parent spans several result rows
       if (/\bAssessment\b/.test(text) || /Company Name/.test(text)) break; // header reached
       row = parent;
@@ -94,7 +120,7 @@
     const cells = cellsOf(row);
     for (const header of findAssessmentHeaders(doc)) {
       if (header.index < 0 || cells.length !== header.count) continue;
-      const label = norm(cells[header.index].textContent);
+      const label = norm(textOf(cells[header.index]));
       if (label) return label;
     }
     // Fallback: a short leaf text inside the row that looks like a status badge.
@@ -122,7 +148,7 @@
   //   rowCount: number of distinct MCs visible on the page
   function readHighway(doc, mcRaw) {
     const mc = String(mcRaw).replace(/^0+/, '');
-    const bodyText = (doc.body && doc.body.textContent) || '';
+    const bodyText = textOf(doc.body);
     const h = /Results for\s*["“']([^"”']{1,100})["”']/.exec(bodyText);
     const headingQuery = h ? norm(h[1]) : null;
 
