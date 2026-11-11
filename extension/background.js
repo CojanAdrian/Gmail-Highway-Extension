@@ -72,7 +72,7 @@ function saveCacheSoon() {
 // ---------- messaging ----------
 
 async function broadcast(msg) {
-  const tabs = await chrome.tabs.query({ url: 'https://mail.google.com/*' });
+  const tabs = await chrome.tabs.query({ url: ['https://mail.google.com/*', 'https://one.dat.com/*'] });
   for (const t of tabs) chrome.tabs.sendMessage(t.id, msg).catch(() => {});
 }
 
