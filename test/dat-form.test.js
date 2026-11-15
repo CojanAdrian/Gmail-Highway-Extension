@@ -174,3 +174,20 @@ test('equipment names and dates', () => {
   assert.equal(F.dateText(el, '2026-11-05'), '11/05/2026');
   assert.equal(F.norm('Fort Collins'), F.norm('Ft Collins'));
 });
+
+test('only carriers showing in the results are kept (not similar results or other searches)', async () => {
+  const dom = new JSDOM(`<!doctype html><body><table>
+    <tr><td>Genius Logistics LLC</td><td>(347) 522-1125</td></tr>
+    <tr><td>AC Freight Solution...</td><td>(913) 494-2705</td></tr>
+    <tr><td>Orozco Trucking Inc</td><td>alex.o@orozcotrucking.com</td></tr>
+  </table></body>`);
+  const text = await F.resultsText(dom.window.document);
+  const heard = [
+    { mc: '1', names: ['GENIUS LOGISTICS LLC'], contacts: ['3475221125'] },
+    { mc: '2', names: ['AC FREIGHT SOLUTIONS INC'], contacts: ['9134942705'] },
+    { mc: '3', names: ['OROZCO TRUCKING INC'], contacts: ['alex.o@orozcotrucking.com'] },
+    { mc: '4', names: ['SIMILAR RESULT CARRIER'], contacts: ['5555550100'] },
+    { mc: '5', names: ['OTHER SAVED SEARCH LLC'], contacts: ['ops@other.com'] },
+  ];
+  assert.deepStrictEqual(F.onScreen(heard, text).map((c) => c.mc), ['1', '2', '3']);
+});

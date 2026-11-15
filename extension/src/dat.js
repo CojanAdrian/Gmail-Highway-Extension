@@ -117,12 +117,18 @@
         stableSince = Date.now();
       } else if (collecting.size > 0 && Date.now() - stableSince > 4000) break;
     }
-    const carriers = [...collecting.values()];
+    const heard = [...collecting.values()];
     collecting = null;
-    return { ok: true, carriers, steps: filled.steps, seen: filled.seen };
+    // Only the carriers showing in this search's results (DAT also loads
+    // similar results and refreshes other saved searches meanwhile).
+    await new Promise((r) => setTimeout(r, 1500)); // let the rows draw
+    const carriers = McxDatForm.onScreen(heard, await McxDatForm.resultsText(document));
+    const steps = { ...filled.steps, results: { heard: heard.length, onScreen: carriers.length } };
+    return { ok: true, carriers, steps, seen: filled.seen };
   }
   const toHook = (msg) => window.postMessage({ source: 'mcx-dat-cmd', ...msg }, location.origin);
-  store.send({ type: 'dat-frame', origin: location.origin, href: location.href, top: window === window.top });
+  let quiet = false; // the extension's own hidden DAT window: no tags, no Highway checks for every posting
+  store.send({ type: 'dat-frame', origin: location.origin, href: location.href, top: window === window.top }).then((r) => { if (r && r.quiet) quiet = true; }, () => {});
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'dat-learn') {
@@ -204,7 +210,7 @@
         if (!m) byName.set(name, (m = new Map()));
         m.set(c.mc, c.contacts || []);
       }
-      store.request(c.mc); // every posting, visible or not
+      if (!quiet) store.request(c.mc); // every posting, visible or not
     }
     scheduleScan();
   });

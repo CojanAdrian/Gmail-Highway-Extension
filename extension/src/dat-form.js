@@ -465,7 +465,58 @@
     return { ok: true, steps, seen: found.seen.slice(0, 25) };
   }
 
-  const api = { fillAndSearch, findFields, describe, equipmentWanted, dateText, norm };
+  // ---------- which carriers are in the results on screen ----------
+  // DAT's page also loads other lists while it is open (similar results,
+  // other saved searches refreshing), so only carriers whose row shows in
+  // the results of this search are kept.
+
+  function textOf(doc) {
+    const body = doc.body;
+    if (!body) return '';
+    return typeof body.innerText === 'string' && body.innerText ? body.innerText : body.textContent || '';
+  }
+
+  // All text of the results, scrolling through long (virtual) lists so rows
+  // further down count too.
+  async function resultsText(doc) {
+    const parts = [textOf(doc)];
+    const win = doc.defaultView;
+    const scrollers = [...doc.querySelectorAll('*')].filter((el) => {
+      if (el.scrollHeight <= el.clientHeight + 50 || el.clientHeight < 100) return false;
+      const o = win.getComputedStyle(el).overflowY;
+      return o === 'auto' || o === 'scroll';
+    });
+    for (const el of scrollers.slice(0, 4)) {
+      const start = el.scrollTop;
+      for (let top = 0, i = 0; top < el.scrollHeight && i < 40; top += Math.max(200, el.clientHeight * 0.8), i++) {
+        el.scrollTop = top;
+        await sleep(150);
+        parts.push(textOf(doc));
+      }
+      el.scrollTop = start;
+    }
+    return parts.join('\n');
+  }
+
+  function upperName(s) {
+    return String(s || '').toUpperCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim();
+  }
+
+  // carriers: [{ mc, names, contacts }]; text: what the results show.
+  function onScreen(carriers, text) {
+    const names = upperName(text);
+    const lower = String(text).toLowerCase();
+    const digits = String(text).replace(/\D/g, '');
+    return carriers.filter((c) =>
+      (c.names || []).some((n) => {
+        const name = upperName(n);
+        return name.length >= 3 && (names.includes(name) || (name.length > 14 && names.includes(name.slice(0, 14))));
+      }) ||
+      (c.contacts || []).some((x) => (x.includes('@') ? lower.includes(x.toLowerCase()) : x.length >= 10 && digits.includes(x.slice(-10))))
+    );
+  }
+
+  const api = { resultsText, onScreen, fillAndSearch, findFields, describe, equipmentWanted, dateText, norm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.McxDatForm = api;
 })(typeof self !== 'undefined' ? self : this);

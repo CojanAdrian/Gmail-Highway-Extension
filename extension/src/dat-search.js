@@ -47,7 +47,7 @@ async function onDatMessage(msg, sender) {
       const f = datFrame(sender);
       if (f) Object.assign(f, { origin: msg.origin, top: !!msg.top });
       if (datLearn && sender.tab && sender.tab.id !== datTabId) chrome.tabs.sendMessage(sender.tab.id, { type: 'dat-learn', on: true }).catch(() => {});
-      return { ok: true };
+      return { ok: true, quiet: !!(sender.tab && sender.tab.id === datTabId) };
     }
     case 'dat-login-seen': {
       const f = datFrame(sender);
