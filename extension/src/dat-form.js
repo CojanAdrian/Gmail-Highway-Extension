@@ -287,19 +287,50 @@
     return `${m}/${d}/${y}`;
   }
 
+  // ---------- the date ----------
+  // DAT's "Date Range" is set by clicking days in its calendar: the pickup
+  // day once for "from" and once more for "to". Typing is only a fallback,
+  // because DAT can keep the old "to" day and call the range invalid.
+
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+  // The date box(es) of the field: one box, or two (from and to).
+  function dateBoxes(el) {
+    const box = el.closest('mat-date-range-input, .mat-date-range-input, [class*="date-range"], mat-form-field, .mat-mdc-form-field') || el.parentElement;
+    const inputs = box ? [...box.querySelectorAll('input')].filter((i) => i.type !== 'hidden') : [];
+    return inputs.length >= 2 ? inputs.slice(0, 2) : [el];
+  }
+
+  // True when the field shows the pickup day as both "from" and "to".
+  function dateIsSet(el, day) {
+    const [y, m, d] = day.split('-').map(Number);
+    const days = (text) =>
+      [...String(text).matchAll(/(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/g)].map((x) => {
+        const year = Number(x[3]) < 100 ? 2000 + Number(x[3]) : Number(x[3]);
+        return Number(x[1]) === m && Number(x[2]) === d && year === y;
+      });
+    const found = dateBoxes(el).flatMap((b) => days(b.value));
+    if (found.length >= 2) return found.every(Boolean);
+    return found.length === 1 && found[0] && dateBoxes(el).length === 1 && !/\d\s*(–|-|to)\s*\d/.test(el.value.replace(/\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}/, ''));
+  }
+
   async function fillDate(doc, el, day) {
     if (!day || !el || el.tagName !== 'INPUT') return { ok: false, skipped: true };
-    if (el.readOnly) return pickInCalendar(doc, el, day);
-    // DAT's "Date Range" is two boxes in one field (from – to): both get the
-    // pickup day, or DAT says "Invalid date range".
-    const box = el.closest('mat-date-range-input, .mat-date-range-input, [class*="date-range"], mat-form-field, .mat-mdc-form-field') || el.parentElement;
-    const inputs = box ? [...box.querySelectorAll('input')].filter((i) => !i.readOnly && i.type !== 'hidden') : [el];
-    const boxes = inputs.length >= 2 ? inputs.slice(0, 2) : [el];
+    if (dateIsSet(el, day)) return { ok: true, already: true, shows: el.value };
+    const cal = await pickInCalendar(doc, el, day);
+    if (cal.ok && dateIsSet(el, day)) return { ok: true, calendar: true, shows: dateBoxes(el).map((b) => b.value).join(' – ') };
+    await typeDate(doc, el, day);
+    return { ok: dateIsSet(el, day), typed: true, calendar: cal, shows: dateBoxes(el).map((b) => b.value).join(' – ') };
+  }
+
+  async function typeDate(doc, el, day) {
+    const boxes = dateBoxes(el).filter((b) => !b.readOnly);
+    if (!boxes.length) return;
     let text = dateText(boxes[0], day);
-    // One box holding the whole range ("11/15/2026 – 11/15/2026").
-    const rangeSep = boxes.length === 1 && String(el.value || el.getAttribute('placeholder') || '').match(/\d\s*(–|-|to)\s*\d/);
-    if (rangeSep) text = `${text} ${rangeSep[1]} ${text}`;
-    // The end first, so the start is never after it while typing.
+    if (boxes.length === 1 && /\d\s*(–|-|to)\s*\d/.test(el.value || el.getAttribute('placeholder') || '')) {
+      text = `${text} – ${text}`;
+    }
+    // The "to" box first, so "from" is never after it while typing.
     for (const input of boxes.length === 2 ? [boxes[1], boxes[0], boxes[1]] : boxes) {
       input.focus();
       fire(input, 'focusin');
@@ -311,44 +342,76 @@
       fire(input, 'focusout');
     }
     if (options(doc).length) key(el, 'Escape');
-    return { ok: true, typed: boxes.map((b) => b.value).join(' – ') };
   }
 
-  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  // The open calendar: a visible box showing the month name and day buttons.
+  function openCalendar(doc) {
+    const sel = 'mat-calendar, .mat-calendar, [class*="calendar"], [class*="datepicker"], [role="dialog"], .cdk-overlay-pane';
+    const dayCount = (b) => [...b.querySelectorAll('button, td, [role="gridcell"], span, div')].filter((c) => !c.children.length && /^([1-9]|[12]\d|3[01])$/.test(c.textContent.trim())).length;
+    const boxes = [...doc.querySelectorAll(sel)].filter(visible).filter((b) => /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(b.textContent) && dayCount(b) >= 28);
+    // The smallest one that still holds the days.
+    return boxes.sort((a, b) => a.textContent.length - b.textContent.length)[0] || null;
+  }
 
-  // Opens the date picker and clicks the day (twice for a range: from and to).
+  // Which month and year the calendar shows ("NOV 2026").
+  function shownMonth(cal) {
+    const m = cal.textContent.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(20\d\d)\b/i);
+    if (!m) return null;
+    return { month: MONTHS.findIndex((name) => name.toLowerCase().startsWith(m[1].toLowerCase())) + 1, year: Number(m[2]) };
+  }
+
+  function findDayCell(cal, y, m, d) {
+    const labels = [`${MONTHS[m - 1]} ${d}, ${y}`, `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`, `${m}/${d}/${y}`];
+    const cells = [...cal.querySelectorAll('button, [role="gridcell"], td, [aria-label], [data-date]')].filter(visible);
+    const byLabel = cells.find((c) => labels.some((l) => (c.getAttribute('aria-label') || '').includes(l)) || c.getAttribute('data-date') === `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    if (byLabel) return byLabel.querySelector('button') || byLabel;
+    // No labels: the day number in the month shown.
+    const shown = shownMonth(cal);
+    if (!shown || shown.month !== m || shown.year !== y) return null;
+    const plain = cells.filter((c) => c.textContent.trim() === String(d) && !c.disabled && c.getAttribute('aria-disabled') !== 'true' && !c.querySelector('button, td'));
+    return plain[0] || null;
+  }
+
+  // Opens the calendar and clicks the pickup day twice (from and to).
   async function pickInCalendar(doc, el, day) {
     const [y, m, d] = day.split('-').map(Number);
-    const labels = [`${MONTHS[m - 1]} ${d}, ${y}`, `${MONTHS[m - 1].slice(0, 3)} ${d}, ${y}`, `${m}/${d}/${y}`];
-    const opener = (el.closest('mat-form-field, .mat-mdc-form-field') || el.parentElement || el).querySelector('button, mat-datepicker-toggle, [class*="calendar"], [class*="toggle"]') || el;
-    click(el);
-    let cell = await waitFor(() => findDayCell(doc, labels), 1500);
-    if (!cell && opener !== el) {
+    const field = el.closest('mat-form-field, .mat-mdc-form-field') || el.parentElement;
+    const toggle = field && field.querySelector('mat-datepicker-toggle button, mat-datepicker-toggle, button, [class*="calendar"], [class*="toggle"]');
+    let cal = null;
+    for (const opener of [toggle, el].filter(Boolean)) {
       click(opener);
-      cell = await waitFor(() => findDayCell(doc, labels), 3000);
+      cal = await waitFor(() => openCalendar(doc), 2500);
+      if (cal) break;
     }
-    // The wanted month may be the next one.
-    for (let i = 0; !cell && i < 2; i++) {
-      const next = [...doc.querySelectorAll('button')].find((b) => visible(b) && /next month/i.test(b.getAttribute('aria-label') || ''));
-      if (!next) break;
-      click(next);
-      cell = await waitFor(() => findDayCell(doc, labels), 1500);
+    if (!cal) return { ok: false, why: 'no calendar opened' };
+    let cell = null;
+    for (let i = 0; i < 13 && !(cell = findDayCell(cal, y, m, d)); i++) {
+      const shown = shownMonth(cal);
+      const forward = !shown || shown.year < y || (shown.year === y && shown.month < m);
+      const re = forward ? /next/i : /prev/i;
+      const step = [...cal.querySelectorAll('button')].find((b) => visible(b) && re.test(`${b.getAttribute('aria-label') || ''} ${b.className}`));
+      if (!step) break;
+      click(step);
+      await sleep(250);
+      cal = openCalendar(doc) || cal;
     }
-    if (!cell) return { ok: false, calendar: true };
-    click(cell);
-    await sleep(250);
-    const again = findDayCell(doc, labels);
-    if (again) click(again);
-    await sleep(250);
-    const done = [...doc.querySelectorAll('button')].find((b) => visible(b) && /^(apply|done|ok|close)$/i.test((b.textContent || '').trim()));
-    if (done) click(done);
-    else key(doc.activeElement || el, 'Escape');
-    return { ok: true, picked: el.value };
-  }
-
-  function findDayCell(doc, labels) {
-    const cells = [...doc.querySelectorAll('[aria-label], [data-date], td, [role="gridcell"] button, [role="gridcell"]')].filter(visible);
-    return cells.find((c) => labels.some((l) => (c.getAttribute('aria-label') || '').trim().startsWith(l) || c.getAttribute('data-date') === l)) || null;
+    if (!cell) return { ok: false, why: 'day not in calendar' };
+    click(cell); // from
+    await sleep(300);
+    cal = openCalendar(doc);
+    const again = cal && findDayCell(cal, y, m, d);
+    if (again) {
+      click(again); // to
+      await sleep(300);
+    }
+    cal = openCalendar(doc);
+    if (cal) {
+      const close = [...cal.querySelectorAll('button')].find((b) => visible(b) && /^(apply|done|ok|close)$/i.test(b.textContent.trim()));
+      if (close) click(close);
+      else key(doc.activeElement || el, 'Escape');
+      await sleep(200);
+    }
+    return { ok: true };
   }
 
   // How close two elements sit in the page (depth of their shared parent).
@@ -393,6 +456,8 @@
     }
     steps.equipment = fields.equipment ? await fillEquipment(doc, fields.equipment, lane.equipment) : { ok: false, missing: true };
     steps.date = fields.date ? await fillDate(doc, fields.date, lane.pickupDate) : { ok: false, missing: true };
+    // A wrong date range makes DAT refuse the search, so stop and say so.
+    if (fields.date && lane.pickupDate && !steps.date.ok) return { ok: false, code: 'no-date', steps, seen: found.seen.slice(0, 25) };
     await sleep(300);
     const button = await waitFor(() => findSearchButton(doc, fields.origin), 4000);
     if (!button) return { ok: false, code: 'no-search-button', steps, seen: found.seen.slice(0, 25) };

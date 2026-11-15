@@ -90,6 +90,64 @@ test('a date range in two boxes gets the pickup day in both (no "Invalid date ra
   assert.equal(page.searched(), 1);
 });
 
+// Like DAT: one box "from – to"; typing only changes "from"; the calendar
+// (opened by its icon) shows "NOV 2026" and plain day numbers; the first
+// click sets "from", the second "to", then it closes.
+function withDatCalendar(page, startValue = '11/16/2026 – 11/15/2026') {
+  const { doc } = page;
+  const input = doc.getElementById('dt');
+  input.value = startValue;
+  const fmt = (d) => `11/${String(d).padStart(2, '0')}/2026`;
+  let range = startValue.split(' – ');
+  input.addEventListener('input', () => {
+    const typed = input.value.split(/\s*–\s*/)[0];
+    range = [typed, range[1]];
+    input.value = range.join(' – ');
+  });
+  const icon = doc.createElement('button');
+  icon.type = 'button';
+  icon.className = 'calendar-icon';
+  icon.textContent = 'calendar_today';
+  input.parentElement.appendChild(icon);
+  let clicks = 0;
+  icon.addEventListener('click', () => {
+    const cal = doc.createElement('div');
+    cal.className = 'dat-calendar';
+    cal.innerHTML = '<div>NOV 2026</div><button class="prev">‹</button><button class="next">›</button>' + Array.from({ length: 30 }, (_, i) => `<button class="day">${i + 1}</button>`).join('');
+    cal.querySelectorAll('.day').forEach((b) =>
+      b.addEventListener('click', () => {
+        clicks += 1;
+        range = clicks === 1 ? [fmt(b.textContent), fmt(b.textContent)] : [range[0], fmt(b.textContent)];
+        input.value = range.join(' – ');
+        if (clicks === 2) cal.remove();
+      })
+    );
+    doc.querySelector('.cdk-overlay-container').appendChild(cal);
+  });
+  return input;
+}
+
+test('the date range is set in DAT calendar, from and to the pickup day', async () => {
+  const page = datPage();
+  const input = withDatCalendar(page);
+  const out = await F.fillAndSearch(page.doc, { ...LANE, pickupDate: '2026-11-16' }, { formTimeout: 1000 });
+  assert.equal(out.ok, true, JSON.stringify(out.steps && out.steps.date));
+  assert.equal(input.value, '11/16/2026 – 11/16/2026');
+  assert.equal(out.steps.date.calendar, true);
+  assert.equal(page.searched(), 1);
+});
+
+test('when the date cannot be set, it stops instead of searching a wrong range', async () => {
+  const page = datPage();
+  const input = page.doc.getElementById('dt');
+  input.value = '11/16/2026 – 11/15/2026';
+  input.addEventListener('input', () => (input.value = '11/16/2026 – 11/15/2026'));
+  const out = await F.fillAndSearch(page.doc, { ...LANE, pickupDate: '2026-11-16' }, { formTimeout: 1000 });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'no-date');
+  assert.equal(page.searched(), 0);
+});
+
 test('Van or Reefer picks both when DAT has no single entry for it', async () => {
   const page = datPage();
   const picked = [];
