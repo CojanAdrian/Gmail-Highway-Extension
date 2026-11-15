@@ -146,6 +146,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 const pendingFinal = new Map(); // mc -> promise of the broadcast result
 
 // Returns a promise for the final result (never rejects).
+// The minimized Highway window closes after two minutes with nothing to
+// check (an alarm, since the background script sleeps in between).
+const WORKERS_IDLE_ALARM = 'close-highway-window';
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== WORKERS_IDLE_ALARM) return;
+  ready.then(() =>
+    withWindowLock(async () => {
+      if (pendingFinal.size > 0 || queue.size > 0 || workerWindowId == null) return;
+      const id = workerWindowId;
+      workerWindowId = null;
+      slots = [];
+      await saveSession();
+      await chrome.windows.remove(id).catch(() => {});
+    })
+  );
+});
+
 function enqueue(mc) {
   if (pendingFinal.has(mc)) return pendingFinal.get(mc);
   const p = queue
@@ -163,7 +180,11 @@ function enqueue(mc) {
       broadcast({ type: 'result', mc, result });
       return result;
     })
-    .finally(() => pendingFinal.delete(mc));
+    .finally(() => {
+      pendingFinal.delete(mc);
+      if (pendingFinal.size === 0) chrome.alarms.create(WORKERS_IDLE_ALARM, { delayInMinutes: 2 });
+    });
+  chrome.alarms.clear(WORKERS_IDLE_ALARM);
   pendingFinal.set(mc, p);
   return p;
 }

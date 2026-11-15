@@ -290,29 +290,28 @@
   async function fillDate(doc, el, day) {
     if (!day || !el || el.tagName !== 'INPUT') return { ok: false, skipped: true };
     if (el.readOnly) return pickInCalendar(doc, el, day);
-    let text = dateText(el, day);
-    const rangeSep = String(el.value || el.getAttribute('placeholder') || '').match(/\d\s*(–|-|to)\s*\d/);
-    if (rangeSep && !el.closest('mat-date-range-input')) text = `${text} ${rangeSep[1]} ${text}`;
-    el.focus();
-    fire(el, 'focusin');
-    setValue(el, text);
-    fire(el, 'input');
-    fire(el, 'change');
-    key(el, 'Enter');
-    await sleep(150);
-    fire(el, 'blur', { bubbles: false });
-    fire(el, 'focusout');
-    // A date range has a second box right after; same day there.
-    const range = el.closest('mat-date-range-input, [class*="date-range"]');
-    const end = range && [...range.querySelectorAll('input')].find((i) => i !== el);
-    if (end && !end.value) {
-      setValue(end, text);
-      fire(end, 'input');
-      fire(end, 'change');
-      fire(end, 'blur', { bubbles: false });
+    // DAT's "Date Range" is two boxes in one field (from – to): both get the
+    // pickup day, or DAT says "Invalid date range".
+    const box = el.closest('mat-date-range-input, .mat-date-range-input, [class*="date-range"], mat-form-field, .mat-mdc-form-field') || el.parentElement;
+    const inputs = box ? [...box.querySelectorAll('input')].filter((i) => !i.readOnly && i.type !== 'hidden') : [el];
+    const boxes = inputs.length >= 2 ? inputs.slice(0, 2) : [el];
+    let text = dateText(boxes[0], day);
+    // One box holding the whole range ("11/15/2026 – 11/15/2026").
+    const rangeSep = boxes.length === 1 && String(el.value || el.getAttribute('placeholder') || '').match(/\d\s*(–|-|to)\s*\d/);
+    if (rangeSep) text = `${text} ${rangeSep[1]} ${text}`;
+    // The end first, so the start is never after it while typing.
+    for (const input of boxes.length === 2 ? [boxes[1], boxes[0], boxes[1]] : boxes) {
+      input.focus();
+      fire(input, 'focusin');
+      setValue(input, text);
+      fire(input, 'input');
+      fire(input, 'change');
+      await sleep(150);
+      fire(input, 'blur', { bubbles: false });
+      fire(input, 'focusout');
     }
     if (options(doc).length) key(el, 'Escape');
-    return { ok: true, typed: text };
+    return { ok: true, typed: boxes.map((b) => b.value).join(' – ') };
   }
 
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];

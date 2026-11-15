@@ -13,7 +13,6 @@
 
 const DAT_START = 'https://one.dat.com/search-trucks';
 const DAT_GAP_MS = 12000; // between two searches
-const DAT_IDLE_CLOSE_MS = 10 * 60 * 1000;
 let datRecipe = null;
 let datLearn = null; // { lane, appTab, at }
 let datLastRun = null; // for diagnostics
@@ -126,6 +125,7 @@ async function ensureDatTab(url) {
   const win = await chrome.windows.create({ url, focused: false, width: 1400, height: 900, left: 0, top: 0 });
   chrome.windows.update(win.id, { state: 'minimized' }).catch(() => {});
   datWindowId = win.id;
+  chrome.storage.session.set({ datWindowId }).catch(() => {});
   const [first] = await chrome.tabs.query({ windowId: win.id });
   datTabId = first.id;
   chrome.tabs.update(datTabId, { autoDiscardable: false }).catch(() => {});
@@ -133,14 +133,21 @@ async function ensureDatTab(url) {
   return datTabId;
 }
 
-function closeDatSoon() {
+// Closes the DAT window as soon as a search is over, so windows don't pile up.
+async function closeDatWindow() {
   clearTimeout(datCloseTimer);
-  datCloseTimer = setTimeout(() => {
-    if (datWindowId != null) chrome.windows.remove(datWindowId).catch(() => {});
-    datWindowId = null;
-    datTabId = null;
-  }, DAT_IDLE_CLOSE_MS);
+  const id = datWindowId;
+  datWindowId = null;
+  datTabId = null;
+  chrome.storage.session.remove('datWindowId').catch(() => {});
+  if (id != null) await chrome.windows.remove(id).catch(() => {});
 }
+
+// A DAT window left behind when the extension restarted mid-search is closed too.
+chrome.storage.session.get({ datWindowId: null }).then(({ datWindowId: left }) => {
+  if (left != null && left !== datWindowId) chrome.windows.remove(left).catch(() => {});
+  chrome.storage.session.remove('datWindowId').catch(() => {});
+});
 
 chrome.windows.onRemoved.addListener((id) => {
   if (id === datWindowId) {
@@ -200,12 +207,11 @@ async function runDatFind(id, lane, appTab) {
       res = { ok: false, code: 'dat-open', error: String((e && e.message) || e) };
       break;
     }
-    closeDatSoon();
     status('searching');
     res = (await searchOnDatPage(tabId, lane)) || { ok: false, code: 'error' };
     if (res.ok || !['no-place', 'form-not-found', 'no-search-button'].includes(res.code)) break;
   }
-  await setDatWindowShown(false);
+  await closeDatWindow();
   datLastRun = { at: new Date().toISOString(), lane, ok: !!(res && res.ok), code: res && res.code, steps: res && res.steps, fieldsSeen: res && res.seen, carriers: res && res.carriers ? res.carriers.length : 0 };
   if (!res || !res.ok) return status('error', { code: (res && res.code) || 'error' });
   const carriers = rememberDatCarriers(res.carriers || []) || [];

@@ -7,8 +7,11 @@ const F = require('../extension/src/dat-form.js');
 const PLACES = ['Ft Collins, CO', 'Ft Collins, CO 80521', 'Oklahoma City, OK', 'Collinsville, IL', 'Chicago, IL', 'Chicago Heights, IL', 'Dallas, TX'];
 const EQUIPMENT = ['Vans (Standard)', 'Van - Air-Ride', 'Reefers', 'Flatbeds', 'Step Decks'];
 
-function datPage({ dateValue = '11/14/2026 – 11/14/2026' } = {}) {
+function datPage({ dateValue = '11/14/2026 – 11/14/2026', twoDateBoxes = false } = {}) {
   const field = (label, extra = '') => `<mat-form-field class="mat-mdc-form-field"><mat-label>${label}</mat-label><input class="mat-mdc-input-element" ${extra}></mat-form-field>`;
+  const dateField = twoDateBoxes
+    ? `<mat-form-field class="mat-mdc-form-field"><mat-label>Date Range*</mat-label><mat-date-range-input><input id="dt" placeholder="Start date" value="11/16/2026"><span>–</span><input id="dt2" placeholder="End date" value="11/15/2026"></mat-date-range-input><button class="cal" type="button">calendar</button></mat-form-field>`
+    : field('Date Range*', `id="dt" value="${dateValue}"`);
   const html = `<!doctype html><body>
     <nav><input placeholder="Search carriers"><button class="side-search"><mat-icon>search</mat-icon></button></nav>
     <main><form class="search-form">
@@ -16,7 +19,7 @@ function datPage({ dateValue = '11/14/2026 – 11/14/2026' } = {}) {
       ${field('Destination', 'id="d" aria-autocomplete="list"')} ${field('DH-D', 'value="150"')}
       ${field('Equipment Type*', 'id="e" value="Vans (Standard)"')}
       ${field('Load Type', 'value="Full & Partial"')} ${field('Length ft')} ${field('Weight lbs')}
-      ${field('Date Range*', `id="dt" value="${dateValue}"`)}
+      ${dateField}
       <button type="button" class="go"><mat-icon>search</mat-icon> SEARCH</button>
     </form></main>
     <div class="cdk-overlay-container"></div></body>`;
@@ -76,6 +79,15 @@ test('fills the lane, picks DAT suggestions and presses the form Search', async 
   assert.equal(page.doc.getElementById('dt').value, '11/15/2026 – 11/15/2026');
   assert.equal(page.searched(), 1);
   assert.equal(page.sideSearched(), 0);
+});
+
+test('a date range in two boxes gets the pickup day in both (no "Invalid date range")', async () => {
+  const page = datPage({ twoDateBoxes: true });
+  const out = await F.fillAndSearch(page.doc, LANE, { formTimeout: 1000 });
+  assert.equal(out.ok, true, JSON.stringify(out));
+  assert.equal(page.doc.getElementById('dt').value, '11/15/2026');
+  assert.equal(page.doc.getElementById('dt2').value, '11/15/2026');
+  assert.equal(page.searched(), 1);
 });
 
 test('Van or Reefer picks both when DAT has no single entry for it', async () => {
