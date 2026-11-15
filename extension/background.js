@@ -98,7 +98,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       case 'state':
-        return sendResponse({ loginNeeded, queued: queue.size, datReady: !!datRecipe, datLearning: !!datLearn });
+        return sendResponse({ loginNeeded, queued: queue.size, datReady: true, datLearning: false });
       case 'open-highway':
         await chrome.tabs.create({
           url: msg.mc ? HW_SEARCH + encodeURIComponent(msg.mc) : HW_BROKER + '/',

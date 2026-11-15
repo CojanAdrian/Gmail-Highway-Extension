@@ -150,13 +150,38 @@ chrome.windows.onRemoved.addListener((id) => {
 });
 chrome.tabs.onRemoved.addListener((id) => datFrames.delete(id));
 
+const DAT_SEARCH_PAGE = 'https://one.dat.com/search-equipment';
+
+// Shows or hides (minimizes) the DAT window without taking focus.
+async function setDatWindowShown(shown) {
+  if (datWindowId == null) return;
+  await chrome.windows.update(datWindowId, shown ? { state: 'normal', focused: false } : { state: 'minimized' }).catch(() => {});
+}
+
+// Opens DAT's truck search page, fills in the lane and presses Search, like
+// a person would; the carriers come from DAT's answer (dat-main.js).
+async function searchOnDatPage(tabId, lane) {
+  const t0 = Date.now();
+  // Wait for DAT to load and its page script to say hello.
+  while (Date.now() - t0 < 25000) {
+    const t = await chrome.tabs.get(tabId).catch(() => null);
+    if (!t) return { ok: false, code: 'dat-open' };
+    if (t.url && t.status === 'complete' && isDatLoginPage(t.url)) return { ok: false, code: 'dat-login' };
+    if (datFrames.get(tabId) && datFrames.get(tabId).size) break;
+    await sleep(300);
+  }
+  try {
+    return await Promise.race([
+      chrome.tabs.sendMessage(tabId, { type: 'dat-search-form', lane }),
+      sleep(100000).then(() => ({ ok: false, code: 'timeout' })),
+    ]);
+  } catch (e) {
+    return { ok: false, code: 'dat-not-ready', error: String((e && e.message) || e) };
+  }
+}
+
 async function runDatFind(id, lane, appTab) {
   const status = (stage, extra = {}) => tellApp(appTab, { type: 'dat-find-status', id, stage, ...extra });
-  const fail = (code, extra = {}) => {
-    datLastRun = { at: new Date().toISOString(), ok: false, code, ...extra };
-    status('error', { code, ...extra });
-  };
-  if (!datRecipe) return fail('not-learned');
   const wait = datLastRunAt + DAT_GAP_MS - Date.now();
   if (wait > 0) {
     status('waiting', { ms: wait });
@@ -164,44 +189,25 @@ async function runDatFind(id, lane, appTab) {
   }
   datLastRunAt = Date.now();
   status('opening');
-  let tabId;
-  try {
-    tabId = await ensureDatTab(datRecipe.startUrl || DAT_START);
-  } catch (e) {
-    return fail('dat-open', { error: String((e && e.message) || e) });
-  }
-  closeDatSoon();
-  // Wait for DAT's page to start and use its login, so the search goes out the same way.
-  const hosts = new Set(datRecipe.steps.map((s) => templateHost(s.url)).filter(Boolean));
-  let frameId = null;
-  const t0 = Date.now();
-  while (Date.now() - t0 < 20000) {
-    const t = await chrome.tabs.get(tabId).catch(() => null);
-    if (!t) return fail('dat-open');
-    if (t.url && t.status === 'complete' && isDatLoginPage(t.url)) return fail('dat-login');
-    const frames = datFrames.get(tabId);
-    if (frames) {
-      const matching = [...frames.entries()].filter(([, f]) => f.origin === datRecipe.frameOrigin).sort((a, b) => (b[1].top ? 1 : 0) - (a[1].top ? 1 : 0));
-      if (matching.length) {
-        frameId = matching[0][0];
-        if ([...hosts].every((h) => matching[0][1].hosts.has(h)) || Date.now() - t0 > 12000) break;
-      }
+  let res = null;
+  // First in a minimized window; if DAT's lists don't open there, once more with the window shown (behind yours).
+  for (const shown of [false, true]) {
+    let tabId;
+    try {
+      tabId = await ensureDatTab(DAT_SEARCH_PAGE);
+      await setDatWindowShown(shown);
+    } catch (e) {
+      res = { ok: false, code: 'dat-open', error: String((e && e.message) || e) };
+      break;
     }
-    await sleep(300);
+    closeDatSoon();
+    status('searching');
+    res = (await searchOnDatPage(tabId, lane)) || { ok: false, code: 'error' };
+    if (res.ok || !['no-place', 'form-not-found', 'no-search-button'].includes(res.code)) break;
   }
-  if (frameId == null) return fail('dat-not-ready');
-  status('searching');
-  let res;
-  try {
-    res = await chrome.tabs.sendMessage(tabId, { type: 'dat-replay', id, recipe: datRecipe, lane, origin: datRecipe.frameOrigin }, { frameId });
-  } catch (e) {
-    return fail('dat-not-ready', { error: String((e && e.message) || e) });
-  }
-  if (!res || !res.ok) {
-    const code = res && res.code === 'login' ? 'dat-login' : (res && res.code) || 'error';
-    return fail(code, { status: res && res.status, error: res && res.error, step: res && res.step });
-  }
+  await setDatWindowShown(false);
+  datLastRun = { at: new Date().toISOString(), lane, ok: !!(res && res.ok), code: res && res.code, steps: res && res.steps, fieldsSeen: res && res.seen, carriers: res && res.carriers ? res.carriers.length : 0 };
+  if (!res || !res.ok) return status('error', { code: (res && res.code) || 'error' });
   const carriers = rememberDatCarriers(res.carriers || []) || [];
-  datLastRun = { at: new Date().toISOString(), ok: true, carriers: carriers.length };
   status('done', { carriers });
 }

@@ -92,6 +92,35 @@
   // ---------- BulkPosting's automatic truck search ----------
 
   const replays = new Map(); // id -> resolve
+  let collecting = null; // Map(mc -> carrier) while waiting for search results
+
+  // Fills DAT's truck search with the lane, presses Search and gathers the
+  // carriers in the answer. Only the frame that has the form answers; the
+  // top frame says so if no frame had it.
+  async function searchByForm(lane) {
+    const top = window === window.top;
+    const filled = await McxDatForm.fillAndSearch(document, lane);
+    if (!filled.ok) {
+      if (filled.code !== 'form-not-found') return filled;
+      if (!top) return null;
+      await new Promise((r) => setTimeout(r, 45000)); // give a frame that has the form time to answer first
+      return filled;
+    }
+    collecting = new Map();
+    const started = Date.now();
+    let lastSize = -1;
+    let stableSince = Date.now();
+    while (Date.now() - started < 35000) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (collecting.size !== lastSize) {
+        lastSize = collecting.size;
+        stableSince = Date.now();
+      } else if (collecting.size > 0 && Date.now() - stableSince > 4000) break;
+    }
+    const carriers = [...collecting.values()];
+    collecting = null;
+    return { ok: true, carriers, steps: filled.steps, seen: filled.seen };
+  }
   const toHook = (msg) => window.postMessage({ source: 'mcx-dat-cmd', ...msg }, location.origin);
   store.send({ type: 'dat-frame', origin: location.origin, href: location.href, top: window === window.top });
 
@@ -99,6 +128,10 @@
     if (msg.type === 'dat-learn') {
       toHook({ kind: 'learn', on: !!msg.on });
       return false;
+    }
+    if (msg.type === 'dat-search-form') {
+      searchByForm(msg.lane).then((out) => out && sendResponse(out));
+      return true;
     }
     if (msg.type === 'dat-replay') {
       if (msg.origin && msg.origin !== location.origin) return false;
@@ -161,6 +194,7 @@
     // Every carrier DAT showed goes to the background too, for BulkPosting's
     // "Find trucks on DAT" (only MC#, names and contacts).
     const found = (d.carriers || []).filter((c) => c && c.mc).map((c) => ({ mc: c.mc, names: c.names || [], contacts: c.contacts || [] }));
+    if (collecting) for (const c of found) collecting.set(c.mc, c);
     if (found.length) store.send({ type: 'dat-carriers', carriers: found });
     for (const c of d.carriers || []) {
       if (!c || !c.mc || ignore.has(c.mc)) continue;
