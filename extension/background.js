@@ -71,14 +71,20 @@ function saveCacheSoon() {
 
 // ---------- messaging ----------
 
+// BulkPosting app tabs that have asked for a lookup (their address is set
+// by the user, so they are remembered by tab instead of matched by URL).
+const appTabs = new Set();
+
 async function broadcast(msg) {
   const tabs = await chrome.tabs.query({ url: ['https://mail.google.com/*', 'https://*.dat.com/*'] });
-  for (const t of tabs) chrome.tabs.sendMessage(t.id, msg).catch(() => {});
+  const ids = new Set([...tabs.map((t) => t.id), ...appTabs]);
+  for (const id of ids) chrome.tabs.sendMessage(id, msg).catch(() => appTabs.delete(id));
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     await ready;
+    if (msg.from === 'app' && sender.tab) appTabs.add(sender.tab.id);
     switch (msg.type) {
       case 'lookup': {
         const mc = McParse.normalizeMc(msg.mc);
@@ -113,6 +119,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (keys.length > 12) delete datStats[keys[0]];
         return sendResponse({ ok: true });
       }
+      case 'app-address':
+        return sendResponse(await registerAppBridge(msg.address));
       case 'diag-run':
         return sendResponse(await runDiagnostics(msg.mc));
       default:
@@ -189,6 +197,26 @@ async function runDiagnostics(mcRaw) {
     .map((t) => ({ mc: t.mc, outcome: t.outcome, attempts: t.attempts.length }));
   report.dat = Object.keys(datStats).length ? datStats : 'no DAT page has reported (DAT content script not running?)';
   return report;
+}
+
+// ---------- BulkPosting app address ----------
+
+const APP_SCRIPT_ID = 'bulkposting-bridge';
+
+// Runs the bridge on the user's BulkPosting address ('' removes it). The
+// options page asks for permission on that address before sending this.
+async function registerAppBridge(address) {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: [APP_SCRIPT_ID] }).catch(() => {});
+    if (!address) return { ok: true };
+    const origin = new URL(address).origin;
+    await chrome.scripting.registerContentScripts([
+      { id: APP_SCRIPT_ID, matches: [origin + '/*'], js: ['src/mc.js', 'src/app-bridge.js'], runAt: 'document_idle', persistAcrossSessions: true },
+    ]);
+    return { ok: true, origin };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
 }
 
 chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());

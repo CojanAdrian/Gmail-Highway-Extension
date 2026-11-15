@@ -56,3 +56,30 @@ $('fast').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'reset-fast-nav' });
   flash('Fast navigation re-enabled.');
 });
+
+// ---------- BulkPosting address ----------
+
+chrome.storage.sync.get({ appAddress: '' }).then((s) => {
+  $('appAddress').value = s.appAddress || '';
+});
+
+$('appSave').addEventListener('click', async () => {
+  const raw = $('appAddress').value.trim();
+  const say = (text) => ($('appMsg').textContent = text);
+  let origin = '';
+  if (raw) {
+    try {
+      origin = new URL(raw).origin;
+    } catch {
+      return say('That is not a full address (start it with https://).');
+    }
+    // Must be asked for straight from the click.
+    const granted = await chrome.permissions.request({ origins: [origin + '/*'] });
+    if (!granted) return say('Permission was not given, so the address was not saved.');
+  }
+  const r = await chrome.runtime.sendMessage({ type: 'app-address', address: origin });
+  if (!r || r.error) return say('Could not save: ' + ((r && r.error) || 'no answer'));
+  await chrome.storage.sync.set({ appAddress: origin });
+  $('appAddress').value = origin;
+  say(origin ? 'Saved. Reload BulkPosting to see Highway checks.' : 'Removed.');
+});

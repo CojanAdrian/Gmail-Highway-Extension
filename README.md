@@ -9,6 +9,12 @@ DAT One: when you run a truck search, every posting's carrier is looked up right
 not), and a compact tag (`PASS` / `PARTIAL` / `FAIL` / `N/A`) appears at the right end of each row. New
 trucks that show up later are tagged too. Hover a tag for the MC#; click it to open the carrier on Highway.
 
+BulkPosting: the Inquiries tab shows each carrier's Highway result (Pass / Partial / Fail / Not on
+Highway) on every inquiry and in the opened inquiry. The app finds the MC# in the full email; the
+extension does the Highway lookup with the same queue and saved results. Works on localhost:5173
+right away; for the live site, enter its address under **BulkPosting** in the extension settings
+(Chrome asks once for permission on that site).
+
 ## Install (no publishing needed)
 
 1. Open `brave://extensions` (or `chrome://extensions`).

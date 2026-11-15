@@ -62,3 +62,11 @@ test('extractMc: subject first, then newest message, then older', () => {
     null
   );
 });
+
+test('pickMc takes the first MC# of a list that is not ignored', () => {
+  const { pickMc } = require('../extension/src/mc.js');
+  assert.equal(pickMc(['0689501', '123456'], ['689501']), '123456');
+  assert.equal(pickMc(['689501'], ['689501']), null);
+  assert.equal(pickMc([], []), null);
+  assert.equal(pickMc(['00123'], []), '123');
+});

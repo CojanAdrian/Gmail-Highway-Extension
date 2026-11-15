@@ -78,7 +78,18 @@
     return null;
   }
 
-  const api = { findAllMcs, findFirstMc, stripQuoted, extractMc, normalizeMc };
+  // The first MC# of a list (as the BulkPosting app sends them, best first)
+  // that is not on the ignore list.
+  function pickMc(mcs, ignore) {
+    const ign = toIgnoreSet(ignore);
+    for (const raw of mcs || []) {
+      const mc = normalizeMc(raw);
+      if (mc && !ign.has(mc)) return mc;
+    }
+    return null;
+  }
+
+  const api = { findAllMcs, findFirstMc, stripQuoted, extractMc, normalizeMc, pickMc };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.McParse = api;
 })(typeof self !== 'undefined' ? self : this);

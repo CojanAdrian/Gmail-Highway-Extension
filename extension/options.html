@@ -42,6 +42,17 @@
     <span id="msg"></span>
   </div>
 
+  <h2 style="font-size:17px;margin-top:40px">BulkPosting</h2>
+  <label for="appAddress">BulkPosting address
+    <small>The address you open BulkPosting at, e.g. https://bulkposting.yourcompany.com. Its Inquiries tab then shows the
+    same Highway checks. Chrome asks once for permission on that site. Local addresses (localhost:5173) work already.</small>
+  </label>
+  <input id="appAddress" type="url" placeholder="https://" style="width:100%;box-sizing:border-box" />
+  <div class="row">
+    <button class="primary" id="appSave">Save address</button>
+    <span id="appMsg"></span>
+  </div>
+
   <h2 style="font-size:17px;margin-top:40px">Diagnostics</h2>
   <p style="color:#5f6368;margin:4px 0 0">
     If tags are wrong or missing: keep a DAT tab open after running a truck search, then click
