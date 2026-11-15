@@ -6,7 +6,12 @@
 //                      { source: 'bulkposting', type: 'lookup', key, mcs: [...], force }
 //                      { source: 'bulkposting', type: 'open-highway', mc }
 //                      { source: 'bulkposting', type: 'dat-list', since }   (carriers seen on DAT since then)
-//   extension -> page  { source: 'mc-check', type: 'ready', version, loginNeeded }
+//                      { source: 'bulkposting', type: 'dat-learn', lane }   (learn DAT's truck search from your next search)
+//                      { source: 'bulkposting', type: 'dat-find', id, lane } (search DAT by itself)
+//                      { source: 'bulkposting', type: 'dat-forget' }
+//   extension -> page  { source: 'mc-check', type: 'ready', version, loginNeeded, datReady, datLearning }
+//                      { source: 'mc-check', type: 'dat-learned', ok, error }
+//                      { source: 'mc-check', type: 'dat-find-status', id, stage, carriers, code }
 //                      { source: 'mc-check', type: 'picked', key, mc }   (mc null: none left after the ignore list)
 //                      { source: 'mc-check', type: 'result', mc, result }
 //                      { source: 'mc-check', type: 'login', needed }
@@ -39,7 +44,13 @@
 
   async function announce() {
     const state = await send({ type: 'state' });
-    toPage({ type: 'ready', version: chrome.runtime.getManifest().version, loginNeeded: !!(state && state.loginNeeded) });
+    toPage({
+      type: 'ready',
+      version: chrome.runtime.getManifest().version,
+      loginNeeded: !!(state && state.loginNeeded),
+      datReady: !!(state && state.datReady),
+      datLearning: !!(state && state.datLearning),
+    });
   }
 
   window.addEventListener('message', async (event) => {
@@ -50,6 +61,12 @@
     if (msg.type === 'dat-list') {
       const r = await send({ type: 'dat-list', since: msg.since });
       return toPage({ type: 'dat-carriers', carriers: (r && r.carriers) || [] });
+    }
+    if (msg.type === 'dat-learn') return send({ type: 'dat-learn', lane: msg.lane || {} });
+    if (msg.type === 'dat-find') return send({ type: 'dat-find', id: String(msg.id || ''), lane: msg.lane || {} });
+    if (msg.type === 'dat-forget') {
+      await send({ type: 'dat-forget' });
+      return announce();
     }
     if (msg.type === 'lookup') {
       await ready;
@@ -67,6 +84,10 @@
     if (msg.type === 'result') toPage({ type: 'result', mc: msg.mc, result: msg.result });
     else if (msg.type === 'login') toPage({ type: 'login', needed: msg.needed });
     else if (msg.type === 'dat-carriers') toPage({ type: 'dat-carriers', carriers: msg.carriers || [] });
+    else if (msg.type === 'dat-learned') {
+      toPage({ type: 'dat-learned', ok: !!msg.ok, error: msg.error || null });
+      announce();
+    } else if (msg.type === 'dat-find-status') toPage({ ...msg, type: 'dat-find-status' });
   });
 
   announce();

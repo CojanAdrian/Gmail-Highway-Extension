@@ -1,5 +1,5 @@
 // Background service worker: lookup queue, result cache, Highway worker tabs.
-importScripts('src/mc.js', 'src/queue.js', 'src/highway-parse.js');
+importScripts('src/mc.js', 'src/queue.js', 'src/highway-parse.js', 'src/dat-replay.js', 'src/dat-search.js');
 
 const HW_ORIGIN = 'https://highway.com';
 const HW_BROKER = HW_ORIGIN + '/broker';
@@ -20,7 +20,8 @@ const ready = init();
 async function init() {
   const sync = await chrome.storage.sync.get(DEFAULTS);
   settings = { ...DEFAULTS, ...sync };
-  const local = await chrome.storage.local.get({ cache: {}, fastNavDisabled: false });
+  const local = await chrome.storage.local.get({ cache: {}, fastNavDisabled: false, datRecipe: null });
+  datRecipe = local.datRecipe || null;
   cache = local.cache || {};
   fastNavDisabled = !!local.fastNavDisabled;
   const sess = await chrome.storage.session.get({ workerWindowId: null, slots: [], loginNeeded: false });
@@ -97,7 +98,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       case 'state':
-        return sendResponse({ loginNeeded, queued: queue.size });
+        return sendResponse({ loginNeeded, queued: queue.size, datReady: !!datRecipe, datLearning: !!datLearn });
       case 'open-highway':
         await chrome.tabs.create({
           url: msg.mc ? HW_SEARCH + encodeURIComponent(msg.mc) : HW_BROKER + '/',
@@ -124,6 +125,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return sendResponse({ ok: true });
       case 'dat-list':
         return sendResponse({ carriers: datCarriersSince(Number(msg.since) || 0) });
+      case 'dat-frame':
+      case 'dat-login-seen':
+      case 'dat-learn':
+      case 'dat-learn-steps':
+      case 'dat-forget':
+      case 'dat-find':
+        return sendResponse(await onDatMessage(msg, sender));
       case 'app-address':
         return sendResponse(await registerAppBridge(msg.address));
       case 'diag-run':
@@ -200,6 +208,7 @@ async function runDiagnostics(mcRaw) {
     .filter((t) => t.mc !== mc)
     .slice(-8)
     .map((t) => ({ mc: t.mc, outcome: t.outcome, attempts: t.attempts.length }));
+  report.datSearch = { learned: McxDatReplay.describeRecipe(datRecipe), learning: !!datLearn, lastRun: datLastRun };
   report.dat = Object.keys(datStats).length ? datStats : 'no DAT page has reported (DAT content script not running?)';
   return report;
 }
@@ -230,8 +239,9 @@ function rememberDatCarriers(list) {
     fresh.push(entry);
   }
   for (const [mc, e] of datCarriers) if (now - e.at > DAT_KEEP_MS) datCarriers.delete(mc);
-  if (!fresh.length) return;
+  if (!fresh.length) return fresh;
   for (const id of appTabs) chrome.tabs.sendMessage(id, { type: 'dat-carriers', carriers: fresh }).catch(() => appTabs.delete(id));
+  return fresh;
 }
 
 function datCarriersSince(since) {

@@ -89,12 +89,57 @@
 
   reportSoon();
 
+  // ---------- BulkPosting's automatic truck search ----------
+
+  const replays = new Map(); // id -> resolve
+  const toHook = (msg) => window.postMessage({ source: 'mcx-dat-cmd', ...msg }, location.origin);
+  store.send({ type: 'dat-frame', origin: location.origin, href: location.href, top: window === window.top });
+
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === 'dat-learn') {
+      toHook({ kind: 'learn', on: !!msg.on });
+      return false;
+    }
+    if (msg.type === 'dat-replay') {
+      if (msg.origin && msg.origin !== location.origin) return false;
+      const timer = setTimeout(() => {
+        replays.delete(msg.id);
+        sendResponse({ ok: false, code: 'timeout' });
+      }, 60000);
+      replays.set(msg.id, (d) => {
+        clearTimeout(timer);
+        sendResponse(d);
+      });
+      toHook({ kind: 'replay', id: msg.id, recipe: msg.recipe, lane: msg.lane });
+      return true;
+    }
+    return false;
+  });
+
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data || e.data.source !== 'mcx-dat') return;
     const d = e.data;
     if (d.kind === 'hello') {
       diag.hookHello = true;
       reportSoon();
+      store.send({ type: 'dat-frame', origin: location.origin, href: location.href, top: window === window.top });
+      return;
+    }
+    if (d.kind === 'login-seen') {
+      store.send({ type: 'dat-login-seen', host: d.host, origin: location.origin });
+      return;
+    }
+    if (d.kind === 'learn-steps') {
+      store.send({ type: 'dat-learn-steps', steps: d.steps, href: d.href, origin: location.origin });
+      return;
+    }
+    if (d.kind === 'replay-done') {
+      const done = replays.get(d.id);
+      if (done) {
+        replays.delete(d.id);
+        done(d);
+      }
+      // Its carriers also came through as a normal 'carriers' message (tags).
       return;
     }
     if (d.kind === 'stats') {
