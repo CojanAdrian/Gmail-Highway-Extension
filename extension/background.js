@@ -119,6 +119,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (keys.length > 12) delete datStats[keys[0]];
         return sendResponse({ ok: true });
       }
+      case 'dat-carriers':
+        rememberDatCarriers(msg.carriers || []);
+        return sendResponse({ ok: true });
+      case 'dat-list':
+        return sendResponse({ carriers: datCarriersSince(Number(msg.since) || 0) });
       case 'app-address':
         return sendResponse(await registerAppBridge(msg.address));
       case 'diag-run':
@@ -197,6 +202,40 @@ async function runDiagnostics(mcRaw) {
     .map((t) => ({ mc: t.mc, outcome: t.outcome, attempts: t.attempts.length }));
   report.dat = Object.keys(datStats).length ? datStats : 'no DAT page has reported (DAT content script not running?)';
   return report;
+}
+
+// ---------- DAT carriers for BulkPosting ----------
+
+// Carriers seen in DAT searches, newest last, kept for two hours.
+const datCarriers = new Map(); // mc -> { mc, name, emails, phones, at }
+const DAT_KEEP_MS = 2 * 3600 * 1000;
+
+function rememberDatCarriers(list) {
+  const now = Date.now();
+  const fresh = [];
+  for (const c of list) {
+    const mc = McParse.normalizeMc(c.mc);
+    if (!mc) continue;
+    const emails = (c.contacts || []).filter((x) => /@/.test(x));
+    const phones = (c.contacts || []).filter((x) => /^\d{10,15}$/.test(x));
+    const before = datCarriers.get(mc);
+    const entry = {
+      mc,
+      name: (c.names || [])[0] || (before && before.name) || '',
+      emails: [...new Set([...(before ? before.emails : []), ...emails])],
+      phones: [...new Set([...(before ? before.phones : []), ...phones])],
+      at: now,
+    };
+    datCarriers.set(mc, entry);
+    fresh.push(entry);
+  }
+  for (const [mc, e] of datCarriers) if (now - e.at > DAT_KEEP_MS) datCarriers.delete(mc);
+  if (!fresh.length) return;
+  for (const id of appTabs) chrome.tabs.sendMessage(id, { type: 'dat-carriers', carriers: fresh }).catch(() => appTabs.delete(id));
+}
+
+function datCarriersSince(since) {
+  return [...datCarriers.values()].filter((e) => e.at >= since);
 }
 
 // ---------- BulkPosting app address ----------

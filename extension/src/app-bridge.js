@@ -5,10 +5,12 @@
 //   page -> extension  { source: 'bulkposting', type: 'hello' }
 //                      { source: 'bulkposting', type: 'lookup', key, mcs: [...], force }
 //                      { source: 'bulkposting', type: 'open-highway', mc }
+//                      { source: 'bulkposting', type: 'dat-list', since }   (carriers seen on DAT since then)
 //   extension -> page  { source: 'mc-check', type: 'ready', version, loginNeeded }
 //                      { source: 'mc-check', type: 'picked', key, mc }   (mc null: none left after the ignore list)
 //                      { source: 'mc-check', type: 'result', mc, result }
 //                      { source: 'mc-check', type: 'login', needed }
+//                      { source: 'mc-check', type: 'dat-carriers', carriers: [{ mc, name, emails, phones, at }] }
 (function () {
   if (window.__mcCheckBridge) return;
   window.__mcCheckBridge = true;
@@ -45,6 +47,10 @@
     const msg = event.data;
     if (msg.type === 'hello') return announce();
     if (msg.type === 'open-highway') return send({ type: 'open-highway', mc: msg.mc || null });
+    if (msg.type === 'dat-list') {
+      const r = await send({ type: 'dat-list', since: msg.since });
+      return toPage({ type: 'dat-carriers', carriers: (r && r.carriers) || [] });
+    }
     if (msg.type === 'lookup') {
       await ready;
       const mc = McParse.pickMc(msg.mcs, ignore);
@@ -60,6 +66,7 @@
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'result') toPage({ type: 'result', mc: msg.mc, result: msg.result });
     else if (msg.type === 'login') toPage({ type: 'login', needed: msg.needed });
+    else if (msg.type === 'dat-carriers') toPage({ type: 'dat-carriers', carriers: msg.carriers || [] });
   });
 
   announce();

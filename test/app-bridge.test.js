@@ -19,6 +19,7 @@ function setup({ ignore = [], lookup = () => ({ pending: true }) } = {}) {
         toBackground.push(msg);
         if (msg.type === 'state') return { loginNeeded: false };
         if (msg.type === 'lookup') return lookup(msg);
+        if (msg.type === 'dat-list') return { carriers: [{ mc: '884213', name: 'REDLINE HAUL', emails: ['dispatch@redline.com'], phones: [], at: 5 }] };
         return { ok: true };
       },
       onMessage: { addListener: (fn) => listeners.push(fn) },
@@ -69,4 +70,16 @@ test('answers with no MC# when every one is ignored', async () => {
   await b.tick();
   assert.equal(b.toPage.find((m) => m.type === 'picked').mc, null);
   assert.ok(!b.toBackground.some((m) => m.type === 'lookup'));
+});
+
+test('hands DAT carriers to the page, asked for and as they arrive', async () => {
+  const b = setup();
+  await b.tick();
+  b.post({ type: 'dat-list', since: 0 });
+  await b.tick();
+  const listed = b.toPage.find((m) => m.type === 'dat-carriers');
+  assert.equal(listed.carriers[0].emails[0], 'dispatch@redline.com');
+  b.listeners.forEach((fn) => fn({ type: 'dat-carriers', carriers: [{ mc: '55', name: 'NEW', emails: [], phones: [], at: 9 }] }));
+  await b.tick();
+  assert.equal(b.toPage.filter((m) => m.type === 'dat-carriers').length, 2);
 });

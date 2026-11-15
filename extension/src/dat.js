@@ -113,6 +113,10 @@
     }
     diag.uniqueMcs = seenMcs.size;
     reportSoon();
+    // Every carrier DAT showed goes to the background too, for BulkPosting's
+    // "Find trucks on DAT" (only MC#, names and contacts).
+    const found = (d.carriers || []).filter((c) => c && c.mc).map((c) => ({ mc: c.mc, names: c.names || [], contacts: c.contacts || [] }));
+    if (found.length) store.send({ type: 'dat-carriers', carriers: found });
     for (const c of d.carriers || []) {
       if (!c || !c.mc || ignore.has(c.mc)) continue;
       for (const name of c.names || []) {
