@@ -10,6 +10,10 @@
   const SKIP_NAME_KEY_RE = /city|state|place|location|contactName|firstName|lastName|userName|__typename/i;
   const PHONE_RE = /\d{3}\D{0,3}\d{3}\D{0,2}\d{4}/;
   const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+  // Emails written inside free text, like a posting's comments
+  // ("call or email john@abc.com for rate").
+  const EMAIL_IN_TEXT_RE = /[A-Z0-9._%+-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,}/gi;
+  const EMAIL_KEY_RE = /e-?mail/i;
 
   function normMc(v) {
     if (v == null) return null;
@@ -25,10 +29,12 @@
       .trim();
   }
 
-  // Collect name / phone / email strings inside a posting object.
+  // Collect name / phone / email strings inside a posting object. Emails in
+  // email fields come first, then emails found in comments and other text.
   function describePosting(obj) {
     const names = new Set();
     const contacts = new Set();
+    const textEmails = new Set();
     (function walk(v, key, depth) {
       if (depth > 8 || v == null) return;
       if (typeof v === 'string') {
@@ -37,15 +43,22 @@
         if (key && NAME_KEY_RE.test(key) && !SKIP_NAME_KEY_RE.test(key) && s.length >= 2 && s.length <= 100) {
           names.add(normName(s));
         }
-        if (EMAIL_RE.test(s)) contacts.add(s.toLowerCase());
-        else if (PHONE_RE.test(s) && s.replace(/\D/g, '').length <= 15) contacts.add(s.replace(/\D/g, ''));
+        if (EMAIL_RE.test(s)) {
+          (key && EMAIL_KEY_RE.test(key) ? contacts : textEmails).add(s.toLowerCase());
+          return;
+        }
+        if (PHONE_RE.test(s) && s.replace(/\D/g, '').length <= 15) contacts.add(s.replace(/\D/g, ''));
+        else if (s.includes('@')) for (const m of s.match(EMAIL_IN_TEXT_RE) || []) textEmails.add(m.replace(/[.]+$/, '').toLowerCase());
         return;
       }
       if (typeof v !== 'object') return;
       if (Array.isArray(v)) v.forEach((x) => walk(x, key, depth + 1));
       else for (const [k, x] of Object.entries(v)) walk(x, k, depth + 1);
     })(obj, null, 0);
-    return { names: [...names], contacts: [...contacts] };
+    // Emails first (field ones, then from text), then phones.
+    const all = [...contacts, ...textEmails];
+    const emails = all.filter((x) => x.includes('@'));
+    return { names: [...names], contacts: [...new Set([...emails, ...all.filter((x) => !x.includes('@'))])] };
   }
 
   // Returns [{ mc, names: [...], contacts: [...] }], one per posting found.

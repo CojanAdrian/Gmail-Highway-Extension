@@ -15,13 +15,22 @@ extension does the Highway lookup with the same queue and saved results. Works o
 right away; for the live site, enter its address under **BulkPosting** in the extension settings
 (Chrome asks once for permission on that site).
 
-## Install (no publishing needed)
+## Install (no publishing needed) — Chrome, Brave or Edge
 
-1. Open `brave://extensions` (or `chrome://extensions`).
+The extension works the same in every Chromium browser. Each browser needs it loaded once, and
+needs its own Highway and DAT logins (a login in Brave does not carry over to Chrome).
+
+1. Open `chrome://extensions` in Chrome (`brave://extensions` in Brave, `edge://extensions` in Edge).
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** → choose the `extension` folder.
-4. Make sure you're logged into https://highway.com in this browser.
-5. Open / reload Gmail and DAT One.
+4. In that same browser, log into https://highway.com and https://one.dat.com.
+5. Open / reload Gmail, DAT One and BulkPosting.
+6. Using BulkPosting on its live address (not localhost)? Click the extension icon → **BulkPosting**,
+   enter the address and allow it when Chrome asks.
+
+On DAT, the truck search always sets the load's equipment; if DAT's equipment list has nothing that
+fits, it stops and says so instead of searching with the last search's equipment. Emails written in a
+posting's comments are picked up too (the contact email comes first).
 
 After changing any file: click the reload ↻ icon on the extension card, then reload Gmail / DAT One.
 

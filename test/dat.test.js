@@ -69,3 +69,17 @@ test('returns nothing for unrelated JSON', () => {
 test('normName makes on-screen and API names comparable', () => {
   assert.equal(normName('Matrix Logistics, Inc.'), normName('MATRIX LOGISTICS INC'));
 });
+
+test('reads emails written in the posting comments, after the contact email', () => {
+  const [onlyComment, both] = extractCarriers({
+    data: {
+      postings: [
+        { carrierMcNumber: 222222, posterInfo: { companyName: 'Phone Only LLC', contact: { phone: '(312) 555-0142' } }, comments: ['Team drivers. Email John.D@PhoneOnly.com for rate.', 'No touch'] },
+        { carrierMcNumber: 333333, posterInfo: { companyName: 'Both Inc', contact: { email: 'dispatch@both.com' } }, comment: 'or text me, mike@both.com.' },
+      ],
+    },
+  });
+  assert.equal(onlyComment.contacts[0], 'john.d@phoneonly.com');
+  assert.ok(onlyComment.contacts.includes('3125550142'));
+  assert.deepEqual(both.contacts.filter((x) => x.includes('@')), ['dispatch@both.com', 'mike@both.com']);
+});

@@ -29,6 +29,16 @@
     VF: ['van or flatbed', 'flatbed or van'],
     LB: ['lowboy'],
     TNK: ['tanker'],
+    FT: ['flatbed w/tarps', 'flatbed w/ tarps', 'flatbed with tarps', 'flatbed tarps'],
+    SB: ['straight box truck', 'box truck', 'straight truck'],
+    SP: ['sprinter', 'cargo van', 'sprinter van'],
+  };
+
+  // BulkPosting / McLeod codes that DAT knows under another code.
+  const EQUIPMENT_ALIASES = { RV: 'VR', VM: 'V', VZ: 'V', RM: 'R', RZ: 'R', RR: 'R' };
+  const canonical = (code) => {
+    const c = String(code || '').trim().toUpperCase();
+    return EQUIPMENT_ALIASES[c] || c;
   };
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -54,8 +64,8 @@
       .replace(/\bmount\b/g, 'mt')
       .trim();
 
-  // Codes that DAT may only offer as two separate types.
-  const EQUIPMENT_PARTS = { VR: ['V', 'R'], VF: ['V', 'F'], FR: ['F', 'R'] };
+  // Codes that DAT may only offer as two separate types (or a plainer one).
+  const EQUIPMENT_PARTS = { VR: ['V', 'R'], VF: ['V', 'F'], FR: ['F', 'R'], FT: ['F'] };
 
   function visible(el) {
     if (!el || !el.isConnected) return false;
@@ -227,33 +237,97 @@
   }
 
   function equipmentWanted(code) {
-    const c = String(code || '').toUpperCase();
+    const c = canonical(code);
     const names = EQUIPMENT_NAMES[c] || [];
     return (t) => {
       const words = t.split(' ');
       let s = 0;
       if (words[0] === c.toLowerCase()) s += 6;
       else if (words.includes(c.toLowerCase())) s += 4;
-      for (const n of names) if (t.includes(norm(n))) s += 5 + n.length / 20;
-      return s;
+      for (const n of names) {
+        const nn = norm(n);
+        if (t === nn) s += 9;
+        else if (t.includes(nn)) s += 5 + n.length / 20;
+      }
+      return s > 0 ? s - t.length / 100 : 0;
     };
   }
 
-  async function fillEquipment(doc, el, code) {
-    if (!code) return { ok: true, skipped: true };
-    const first = await fillOneEquipment(doc, el, code);
-    const parts = EQUIPMENT_PARTS[String(code).toUpperCase()];
-    if (first.ok || !parts) return first;
-    const picked = [];
-    for (const part of parts) {
-      const r = await fillOneEquipment(doc, el, part);
-      if (r.ok) picked.push(r.picked);
-    }
-    return picked.length ? { ok: true, picked: picked.join(' + ') } : { ok: false };
+  // Every code that is right for the load's equipment (VR: VR, V or R).
+  function acceptableCodes(code) {
+    const c = canonical(code);
+    return [c, ...(EQUIPMENT_PARTS[c] || [])];
   }
 
-  async function fillOneEquipment(doc, el, code) {
+  // An option that is ticked already (DAT keeps the last search's equipment).
+  function isTicked(o) {
+    return (
+      o.getAttribute('aria-selected') === 'true' ||
+      o.getAttribute('aria-checked') === 'true' ||
+      /\b(mdc-list-item--selected|mat-mdc-option-multiple.*selected|mat-selected)\b/.test(o.className || '') ||
+      !!o.querySelector('.mat-pseudo-checkbox-checked, .mdc-checkbox--selected, input[type="checkbox"]:checked')
+    );
+  }
+
+  // The box around the equipment field (its chips, its shown value).
+  function fieldBox(el) {
+    return el.closest('mat-form-field, .mat-mdc-form-field, [class*="form-field"], [class*="FormField"]') || el.parentElement || el;
+  }
+
+  function fieldShows(el) {
+    const box = fieldBox(el);
+    const values = [...box.querySelectorAll('input, textarea')].map((i) => i.value).join(' ');
+    const label = [...box.querySelectorAll('mat-label, label, .mat-mdc-floating-label')].map((l) => l.textContent).join(' ');
+    let text = `${box.textContent || ''} ${values}`;
+    if (label) text = text.split(label).join(' ');
+    return norm(text);
+  }
+
+  // True when the field shows equipment that is right for the load.
+  function equipmentIsSet(el, code) {
+    const shown = fieldShows(el);
+    if (!shown) return false;
+    return acceptableCodes(code).some((c) => (EQUIPMENT_NAMES[c] || []).some((n) => shown.includes(norm(n))) || shown.split(' ').includes(c.toLowerCase()));
+  }
+
+  // Removes equipment chips that are wrong for this load (left from the last search).
+  async function dropOtherChips(el, code) {
+    const ok = acceptableCodes(code).map(equipmentWanted);
+    const chips = [...fieldBox(el).querySelectorAll('mat-chip, mat-chip-row, .mat-mdc-chip, [role="row"], [class*="chip"]')].filter((c) => !c.querySelector('[class*="chip"]'));
+    for (const chip of chips) {
+      const t = norm(chip.textContent);
+      if (!t || ok.some((w) => w(t) > 0)) continue;
+      const remove = chip.querySelector('[matchipremove], .mat-mdc-chip-remove, .mdc-evolution-chip__action--trailing, button[aria-label*="remove" i], [class*="remove"], [class*="close"]');
+      if (remove) {
+        click(remove);
+        await sleep(200);
+      }
+    }
+  }
+
+  // Sets the load's equipment and checks the field shows it. The search
+  // never runs without it (DAT would keep the last search's equipment).
+  async function fillEquipment(doc, el, code) {
+    if (!code) return { ok: true, skipped: true };
+    await dropOtherChips(el, code);
+    const keep = acceptableCodes(code);
+    let result = await fillOneEquipment(doc, el, canonical(code), keep);
+    const parts = EQUIPMENT_PARTS[canonical(code)];
+    if (!result.ok && parts) {
+      const picked = [];
+      for (const part of parts) {
+        const r = await fillOneEquipment(doc, el, part, keep);
+        if (r.ok) picked.push(r.picked);
+      }
+      result = picked.length ? { ok: true, picked: picked.join(' + ') } : { ok: false };
+    }
+    if (result.ok && !equipmentIsSet(el, code)) return { ok: false, picked: result.picked, shows: fieldShows(el).slice(0, 80) };
+    return { ...result, shows: fieldShows(el).slice(0, 80) };
+  }
+
+  async function fillOneEquipment(doc, el, code, keep = [code]) {
     const wanted = equipmentWanted(code);
+    const keepers = keep.map(equipmentWanted);
     const isTextBox = (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && !el.readOnly;
     if (el.tagName === 'SELECT') {
       const opt = [...el.options].map((o) => ({ o, s: wanted(norm(o.textContent + ' ' + o.value)) })).sort((a, b) => b.s - a.s)[0];
@@ -270,8 +344,18 @@
       opt = await waitFor(() => pickOption(doc, wanted), 4000);
     }
     if (!opt) return { ok: false };
-    click(opt);
-    await sleep(250);
+    // Untick what the last search left that is wrong for this load.
+    for (const o of options(doc)) {
+      if (o !== opt && isTicked(o) && !keepers.some((w) => w(norm(o.textContent)) > 0)) {
+        click(o);
+        await sleep(150);
+      }
+    }
+    // Clicking a ticked option would untick it.
+    if (!isTicked(opt)) {
+      click(opt);
+      await sleep(250);
+    }
     // A list that stays open (several can be ticked) closes with Escape.
     if (options(doc).length) key(doc.activeElement || el, 'Escape');
     return { ok: true, picked: opt.textContent.trim().slice(0, 60) };
@@ -454,7 +538,14 @@
     if (!steps.origin.ok || !steps.destination.ok) {
       return { ok: false, code: 'no-place', steps, seen: found.seen.slice(0, 25) };
     }
+    // The equipment box can draw after the cities; look again for it.
+    if (lane.equipment && !fields.equipment) {
+      const later = await waitFor(() => findFields(doc).fields.equipment, 5000, 300);
+      if (later) fields.equipment = later;
+    }
     steps.equipment = fields.equipment ? await fillEquipment(doc, fields.equipment, lane.equipment) : { ok: false, missing: true };
+    // Equipment matters: never search DAT with the wrong (or last search's) equipment.
+    if (lane.equipment && !steps.equipment.ok) return { ok: false, code: 'no-equipment', steps, seen: found.seen.slice(0, 25) };
     steps.date = fields.date ? await fillDate(doc, fields.date, lane.pickupDate) : { ok: false, missing: true };
     // A wrong date range makes DAT refuse the search, so stop and say so.
     if (fields.date && lane.pickupDate && !steps.date.ok) return { ok: false, code: 'no-date', steps, seen: found.seen.slice(0, 25) };
@@ -516,7 +607,7 @@
     );
   }
 
-  const api = { resultsText, onScreen, fillAndSearch, findFields, describe, equipmentWanted, dateText, norm };
+  const api = { resultsText, onScreen, fillAndSearch, findFields, describe, equipmentWanted, equipmentIsSet, canonical, dateText, norm };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.McxDatForm = api;
 })(typeof self !== 'undefined' ? self : this);

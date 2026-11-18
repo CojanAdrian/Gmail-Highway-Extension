@@ -209,7 +209,7 @@ async function runDatFind(id, lane, appTab) {
     }
     status('searching');
     res = (await searchOnDatPage(tabId, lane)) || { ok: false, code: 'error' };
-    if (res.ok || !['no-place', 'form-not-found', 'no-search-button'].includes(res.code)) break;
+    if (res.ok || !['no-place', 'no-equipment', 'form-not-found', 'no-search-button'].includes(res.code)) break;
   }
   await closeDatWindow();
   datLastRun = { at: new Date().toISOString(), lane, ok: !!(res && res.ok), code: res && res.code, steps: res && res.steps, fieldsSeen: res && res.seen, carriers: res && res.carriers ? res.carriers.length : 0 };

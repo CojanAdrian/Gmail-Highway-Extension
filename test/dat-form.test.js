@@ -191,3 +191,52 @@ test('only carriers showing in the results are kept (not similar results or othe
   ];
   assert.deepStrictEqual(F.onScreen(heard, text).map((c) => c.mc), ['1', '2', '3']);
 });
+
+test('without the equipment it stops instead of searching DAT with the wrong one', async () => {
+  const page = datPage();
+  // This DAT list has no conestoga.
+  const out = await F.fillAndSearch(page.doc, { ...LANE, equipment: 'CN' }, { formTimeout: 1000 });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'no-equipment');
+  assert.equal(page.searched(), 0);
+});
+
+test('equipment left ticked by the last search is unticked; the right one is ticked once', async () => {
+  const page = datPage();
+  const { doc } = page;
+  const input = doc.getElementById('e');
+  const overlay = doc.querySelector('.cdk-overlay-container');
+  const ticked = new Set(['Vans (Standard)']); // DAT remembers the last search
+  const show = () => (input.value = [...ticked].join(', '));
+  show();
+  // A list of check boxes that stays open, like DAT's equipment list.
+  input.addEventListener('input', () => {
+    overlay.innerHTML = '';
+    for (const text of EQUIPMENT) {
+      const o = doc.createElement('mat-option');
+      o.setAttribute('role', 'option');
+      o.setAttribute('aria-selected', String(ticked.has(text)));
+      o.textContent = text;
+      o.addEventListener('click', () => {
+        if (ticked.has(text)) ticked.delete(text);
+        else ticked.add(text);
+        o.setAttribute('aria-selected', String(ticked.has(text)));
+        show();
+      });
+      overlay.appendChild(o);
+    }
+  });
+  const out = await F.fillAndSearch(doc, { ...LANE, equipment: 'R' }, { formTimeout: 1000 });
+  assert.equal(out.ok, true, JSON.stringify(out.steps && out.steps.equipment));
+  assert.deepStrictEqual([...ticked], ['Reefers']);
+  assert.equal(page.searched(), 1);
+});
+
+test("BulkPosting's RV is DAT's van or reefer", async () => {
+  assert.equal(F.canonical('rv'), 'VR');
+  assert.equal(F.canonical('VZ'), 'V');
+  const page = datPage();
+  const out = await F.fillAndSearch(page.doc, { ...LANE, equipment: 'RV' }, { formTimeout: 1000 });
+  assert.equal(out.ok, true);
+  assert.match(out.steps.equipment.picked, /Vans \(Standard\) \+ Reefers/);
+});
